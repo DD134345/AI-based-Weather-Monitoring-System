@@ -1,0 +1,100 @@
+import requests
+import pandas as pd
+import numpy as np
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.model_selection import train_test_split
+from datetime import datetime, timedelta
+import os
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+API_KEY = os.getenv('OPENWEATHER_API_KEY')
+
+class WeatherPredictor:
+    def __init__(self):
+        self.model = DecisionTreeClassifier(random_state=42)
+        self.data = []
+        
+    def fetch_weather_data(self, city):
+        """Fetch weather data from OpenWeatherMap API"""
+        base_url = "http://api.openweathermap.org/data/2.5/weather"
+        params = {
+            'q': city,
+            'appid': API_KEY,
+            'units': 'metric'
+        }
+        
+        try:
+            response = requests.get(base_url, params=params)
+            data = response.json()
+            
+            return {
+                'temperature': data['main']['temp'],
+                'humidity': data['main']['humidity'],
+                'pressure': data['main']['pressure'],
+                'rain': 1 if 'rain' in data else 0
+            }
+        except Exception as e:
+            print(f"Error fetching data: {e}")
+            return None
+    
+    def collect_training_data(self, city, days=30):
+        """Collect weather data for training"""
+        print("Collecting training data...")
+        
+        for _ in range(days):
+            weather_data = self.fetch_weather_data(city)
+            if weather_data:
+                self.data.append(weather_data)
+    
+    def train_model(self):
+        """Train the weather prediction model"""
+        if not self.data:
+            print("No training data available!")
+            return False
+            
+        df = pd.DataFrame(self.data)
+        X = df[['temperature', 'humidity', 'pressure']]
+        y = df['rain']
+        
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+        self.model.fit(X_train, y_train)
+        
+        accuracy = self.model.score(X_test, y_test)
+        print(f"Model accuracy: {accuracy:.2f}")
+        return True
+    
+    def predict_rain(self, temperature, humidity, pressure):
+        """Predict rain probability based on weather parameters"""
+        prediction = self.model.predict([[temperature, humidity, pressure]])
+        return bool(prediction[0])
+
+def main():
+    # Create a .env file with your API key
+    if not API_KEY:
+        print("Please set your OpenWeatherMap API key in the .env file")
+        return
+    
+    predictor = WeatherPredictor()
+    city = "London"  # Change to your city
+    
+    # Collect training data and train model
+    predictor.collect_training_data(city)
+    if predictor.train_model():
+        # Get current weather and make prediction
+        current_weather = predictor.fetch_weather_data(city)
+        if current_weather:
+            will_rain = predictor.predict_rain(
+                current_weather['temperature'],
+                current_weather['humidity'],
+                current_weather['pressure']
+            )
+            print(f"\nCurrent weather in {city}:")
+            print(f"Temperature: {current_weather['temperature']}°C")
+            print(f"Humidity: {current_weather['humidity']}%")
+            print(f"Pressure: {current_weather['pressure']} hPa")
+            print(f"\nPrediction: {'Rain expected' if will_rain else 'No rain expected'}")
+
+if __name__ == "__main__":
+    main()
