@@ -109,7 +109,15 @@
                     fetch(`https://api.openweathermap.org/geo/1.0/reverse?lat=${lat}&lon=${lon}&limit=1&appid=8c7903453e2d73c7e77e20cf66ef969`)
                         .then(res => res.json())
                         .then(data => {
-                            document.getElementById('location').textContent = `${data[0].name}, ${data[0].country}`;
+                            if (data && data.length > 0) {
+                                document.getElementById('location').textContent = `${data[0].name}, ${data[0].country}`;
+                            } else {
+                                document.getElementById('location').textContent = "Location not found";
+                            }
+                        })
+                        .catch(error => {
+                            console.error("Error fetching location:", error);
+                            document.getElementById('location').textContent = "Error fetching location";
                         });
 
                     // Fetch weather data
