@@ -106,7 +106,7 @@
                     const lon = position.coords.longitude;
                     
                     // Update location text
-                    fetch(`https://api.openweathermap.org/geo/1.0/reverse?lat=${lat}&lon=${lon}&limit=1&appid=YOUR_API_KEY`)
+                    fetch(`https://api.openweathermap.org/geo/1.0/reverse?lat=${lat}&lon=${lon}&limit=1&appid=8c7903453e2d73c7e77e20cf66ef969`)
                         .then(res => res.json())
                         .then(data => {
                             document.getElementById('location').textContent = `${data[0].name}, ${data[0].country}`;
