@@ -1,0 +1,11 @@
+ESP32 (recommended for Wi-Fi support) or Arduino Uno
+
+DHT11 or DHT22 Sensor – for temperature and humidity
+
+BMP180 or BME280 Sensor – for pressure
+
+Jumper wires and breadboard
+
+USB cable for programming
+
+Laptop with Arduino IDE and Python installed
