@@ -1,50 +1,35 @@
 import React, { useState, useEffect } from 'react';
-import WeatherDisplay from './components/WeatherDisplay';
-import LocationInput from './components/LocationInput';
-import { fetchWeatherData } from './services/weatherAPI';
-import { getCurrentLocation } from './services/locationService';
+import axios from 'axios';
 
-const App = () => {
-    const [weatherData, setWeatherData] = useState(null);
-    const [location, setLocation] = useState(null);
-    const [error, setError] = useState(null);
+function App() {
+  const [weather, setWeather] = useState(null);
+  const [location, setLocation] = useState(null);
 
-    useEffect(() => {
-        const fetchWeather = async () => {
-            try {
-                const currentLocation = await getCurrentLocation();
-                setLocation(currentLocation);
-                const data = await fetchWeatherData(currentLocation);
-                setWeatherData(data);
-            } catch (err) {
-                setError(err.message);
-            }
-        };
+  useEffect(() => {
+    if ("geolocation" in navigator) {
+      navigator.geolocation.getCurrentPosition(function(position) {
+        setLocation({
+          lat: position.coords.latitude,
+          lon: position.coords.longitude
+        });
+      });
+    }
+  }, []);
 
-        fetchWeather();
-    }, []);
-
-    const handleLocationChange = async (newLocation) => {
-        setLocation(newLocation);
-        try {
-            const data = await fetchWeatherData(newLocation);
-            setWeatherData(data);
-        } catch (err) {
-            setError(err.message);
-        }
-    };
-
-    return (
+  return (
+    <div className="App">
+      <h1>Weather Monitoring System</h1>
+      {weather ? (
         <div>
-            <h1>Weather Monitoring System</h1>
-            {error && <p>Error: {error}</p>}
-            {weatherData ? (
-                <WeatherDisplay data={weatherData} />
-            ) : (
-                <LocationInput onLocationChange={handleLocationChange} />
-            )}
+          <h2>Current Weather</h2>
+          <p>Temperature: {weather.temperature}°C</p>
+          <p>Humidity: {weather.humidity}%</p>
         </div>
-    );
-};
+      ) : (
+        <p>Loading weather data...</p>
+      )}
+    </div>
+  );
+}
 
 export default App;
