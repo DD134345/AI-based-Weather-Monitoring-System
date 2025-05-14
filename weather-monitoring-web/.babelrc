@@ -1,0 +1,4 @@
+// filepath: c:\Users\Admin\Documents\AI-based-Weather-Monitoring-System\weather-monitoring-web\.babelrc
+{
+    "presets": ["@babel/preset-react", "@babel/preset-env"]
+  }

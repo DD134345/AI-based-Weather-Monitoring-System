@@ -1,8 +1,8 @@
 {
   "name": "weather-monitoring-web",
   "version": "1.0.0",
-  "description": "A web application that connects to an AI-based weather monitoring system to inform users of the weather in their current location.",
-  "main": "src/app.js",
+  "description": "A web application that connects to an AI-based weather monitoring system",
+  "main": "src/index.js",
   "scripts": {
     "start": "webpack serve --mode development",
     "build": "webpack --mode production",
@@ -32,3 +32,4 @@
   "author": "Your Name",
   "license": "MIT"
 }
+
