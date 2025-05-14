@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Weather Monitoring System</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 0;
+            background: linear-gradient(135deg, #00b4d8, #0077be);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .container {
+            background: rgba(255, 255, 255, 0.9);
+            border-radius: 20px;
+            padding: 2rem;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            width: 80%;
+            max-width: 600px;
+        }
+
+        h1 {
+            color: #1a1a1a;
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+
+        .weather-card {
+            background: white;
+            border-radius: 15px;
+            padding: 1.5rem;
+            margin-bottom: 1rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .weather-info {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+
+        .weather-item {
+            text-align: center;
+            padding: 1rem;
+            background: #f8f9fa;
+            border-radius: 10px;
+        }
+
+        .weather-item h3 {
+            margin: 0;
+            color: #0077be;
+            font-size: 1.2rem;
+        }
+
+        .weather-item p {
+            margin: 0.5rem 0 0 0;
+            font-size: 1.5rem;
+            font-weight: bold;
+        }
+
+        .location {
+            text-align: center;
+            color: #666;
+            margin-bottom: 1rem;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 2rem;
+            color: #666;
+        }
+
+        .error {
+            color: #dc3545;
+            text-align: center;
+            padding: 1rem;
+            margin-top: 1rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Weather Monitoring System</h1>
+        <div class="location" id="location">
+            Detecting location...
+        </div>
+        <div id="weather-container">
+            <div class="loading">
+                Loading weather data...
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            if ("geolocation" in navigator) {
+                navigator.geolocation.getCurrentPosition(function(position) {
+                    const lat = position.coords.latitude;
+                    const lon = position.coords.longitude;
+                    
+                    // Update location text
+                    fetch(`https://api.openweathermap.org/geo/1.0/reverse?lat=${lat}&lon=${lon}&limit=1&appid=YOUR_API_KEY`)
+                        .then(res => res.json())
+                        .then(data => {
+                            document.getElementById('location').textContent = `${data[0].name}, ${data[0].country}`;
+                        });
+
+                    // Fetch weather data
+                    fetchWeatherData(lat, lon);
+                });
+            } else {
+                document.getElementById('location').textContent = "Geolocation is not supported by your browser";
+            }
+        });
+
+        function fetchWeatherData(lat, lon) {
+            // Replace with your actual backend API endpoint
+            fetch(`/api/weather?lat=${lat}&lon=${lon}`)
+                .then(response => response.json())
+                .then(data => {
+                    const weatherHtml = `
+                        <div class="weather-card">
+                            <div class="weather-info">
+                                <div class="weather-item">
+                                    <h3>Temperature</h3>
+                                    <p>${data.temperature}°C</p>
+                                </div>
+                                <div class="weather-item">
+                                    <h3>Humidity</h3>
+                                    <p>${data.humidity}%</p>
+                                </div>
+                                <div class="weather-item">
+                                    <h3>Pressure</h3>
+                                    <p>${data.pressure} hPa</p>
+                                </div>
+                                <div class="weather-item">
+                                    <h3>Prediction</h3>
+                                    <p>${data.rainPrediction ? 'Rain Expected' : 'No Rain Expected'}</p>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    document.getElementById('weather-container').innerHTML = weatherHtml;
+                })
+                .catch(error => {
+                    document.getElementById('weather-container').innerHTML = `
+                        <div class="error">
+                            Error loading weather data. Please try again later.
+                        </div>
+                    `;
+                });
+        }
+    </script>
+</body>
+</html>
