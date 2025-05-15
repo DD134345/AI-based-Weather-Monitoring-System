@@ -1,44 +1,52 @@
 const express = require('express');
 const cors = require('cors');
-const app = express();
-const port = process.env.PORT || 3000;
+const { spawn } = require('child_process');
+const path = require('path');
 
-// Enable CORS
+const app = express();
+const port = process.env.PORT || 3001;
+
 app.use(cors());
 app.use(express.json());
+app.use(express.static(path.join(__dirname, 'build')));
 
-// Serve static files from public directory
-app.use(express.static('public'));
-
-// API endpoint to get weather data
 app.get('/api/weather', async (req, res) => {
     try {
         const { lat, lon } = req.query;
-        const WeatherPredictor = require('./AI');
-        const predictor = new WeatherPredictor();
         
-        const location = {
-            lat: parseFloat(lat),
-            lon: parseFloat(lon),
-            city: 'Current Location'
-        };
+        // Spawn Python process
+        const pythonProcess = spawn('python', [
+            path.join(__dirname, '..', 'AI'),
+            '--lat', lat,
+            '--lon', lon
+        ]);
 
-        const weatherData = await predictor.fetch_weather_data(location);
-        const rainPrediction = await predictor.predict_rain(
-            weatherData.temperature,
-            weatherData.humidity,
-            weatherData.pressure
-        );
+        let result = '';
 
-        res.json({
-            ...weatherData,
-            rainPrediction
+        // Collect data from Python script
+        pythonProcess.stdout.on('data', (data) => {
+            result += data.toString();
         });
+
+        // Handle Python script completion
+        pythonProcess.on('close', (code) => {
+            if (code !== 0) {
+                return res.status(500).json({ error: 'Failed to process weather data' });
+            }
+            try {
+                const weatherData = JSON.parse(result);
+                res.json(weatherData);
+            } catch (error) {
+                res.status(500).json({ error: 'Invalid data received from AI model' });
+            }
+        });
+
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        console.error('Server error:', error);
+        res.status(500).json({ error: 'Internal server error' });
     }
 });
 
 app.listen(port, () => {
-    console.log(`Server running at http://localhost:${port}`);
+    console.log(`Server running on port ${port}`);
 });

@@ -6,6 +6,7 @@ from sklearn.model_selection import train_test_split
 from datetime import datetime, timedelta
 import os
 from dotenv import load_dotenv
+import json
 
 # Load environment variables
 load_dotenv()
@@ -54,6 +55,41 @@ class WeatherPredictor:
         lon = float(input("Longitude (e.g. -0.1278 for London): "))
         return {'city': city, 'lat': lat, 'lon': lon}
         
+    def predict_from_gps(self, lat, lon):
+        """Predict weather using GPS coordinates"""
+        try:
+            # Get weather data for the GPS location
+            location = {
+                'lat': lat,
+                'lon': lon
+            }
+            
+            # Get current weather data
+            weather_data = self.fetch_weather_data(location)
+            if not weather_data:
+                raise Exception("Failed to fetch weather data")
+            
+            # Train model with historical data for this location
+            self.collect_training_data(location)
+            if not self.train_model():
+                raise Exception("Failed to train model")
+            
+            # Make prediction
+            will_rain = self.predict_rain(
+                weather_data['temperature'],
+                weather_data['humidity'],
+                weather_data['pressure']
+            )
+            
+            return {
+                'current': weather_data,
+                'prediction': will_rain
+            }
+            
+        except Exception as e:
+            print(f"Error in prediction: {e}")
+            return None
+    
     def fetch_weather_data(self, location):
         """Fetch weather data from OpenWeatherMap API using coordinates"""
         base_url = "http://api.openweathermap.org/data/2.5/weather"
@@ -77,48 +113,97 @@ class WeatherPredictor:
         except Exception as e:
             print(f"Error fetching data: {e}")
             return None
-    
-    # ... existing code for collect_training_data, train_model, and predict_rain ...
+
+    def collect_training_data(self, location):
+        """Collect historical weather data for training"""
+        try:
+            # Collect last 5 days of weather data
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=5)
+            
+            base_url = "http://api.openweathermap.org/data/2.5/onecall/timemachine"
+            
+            historical_data = []
+            current_date = start_date
+            
+            while current_date <= end_date:
+                params = {
+                    'lat': location['lat'],
+                    'lon': location['lon'],
+                    'dt': int(current_date.timestamp()),
+                    'appid': API_KEY,
+                    'units': 'metric'
+                }
+                
+                response = requests.get(base_url, params=params)
+                data = response.json()
+                
+                if 'current' in data:
+                    weather = data['current']
+                    historical_data.append({
+                        'temperature': weather['temp'],
+                        'humidity': weather['humidity'],
+                        'pressure': weather['pressure'],
+                        'rain': 1 if 'rain' in weather else 0
+                    })
+                
+                current_date += timedelta(days=1)
+            
+            self.data = historical_data
+            return True
+            
+        except Exception as e:
+            print(f"Error collecting training data: {e}")
+            return False
+
+    def train_model(self):
+        """Train the weather prediction model"""
+        try:
+            if not self.data:
+                return False
+                
+            df = pd.DataFrame(self.data)
+            X = df[['temperature', 'humidity', 'pressure']]
+            y = df['rain']
+            
+            self.model.fit(X, y)
+            return True
+            
+        except Exception as e:
+            print(f"Error training model: {e}")
+            return False
+
+    def predict_rain(self, temperature, humidity, pressure):
+        """Predict if it will rain based on current conditions"""
+        try:
+            prediction = self.model.predict([[temperature, humidity, pressure]])
+            return bool(prediction[0])
+        except Exception as e:
+            print(f"Error making prediction: {e}")
+            return False
 
 def main():
     if not API_KEY:
         print("Please set your OpenWeatherMap API key in the .env file")
         return
     
+    # Add command line argument parsing
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--lat', type=float, required=True)
+    parser.add_argument('--lon', type=float, required=True)
+    args = parser.parse_args()
+    
     predictor = WeatherPredictor()
     
-    # Try automatic location detection first
-    location = predictor.get_current_location()
-    if not location:
-        print("Automatic location detection failed.")
-        try:
-            location = predictor.get_location_input()
-        except ValueError:
-            print("Invalid input. Using default location (London)")
-            location = {
-                'city': 'London',
-                'lat': 51.5074,
-                'lon': -0.1278
-            }
+    # Use provided coordinates
+    result = predictor.predict_from_gps(args.lat, args.lon)
     
-    print(f"Location: {location['city']}")
-    
-    # Collect training data and train model
-    predictor.collect_training_data(location)
-    if predictor.train_model():
-        # Get current weather and make prediction
-        current_weather = predictor.fetch_weather_data(location)
-        if current_weather:
-            will_rain = predictor.predict_rain(
-                current_weather['temperature'],
-                current_weather['humidity'],
-                current_weather['pressure']
-            )
-            print(f"\nCurrent weather in {location['city']}:")
-            print(f"Temperature: {current_weather['temperature']}°C")
-            print(f"Humidity: {current_weather['humidity']}%")
-            print(f"Pressure: {current_weather['pressure']} hPa")
-            print(f"\nPrediction: {'Rain expected' if will_rain else 'No rain expected'}")
+    if result:
+        # Return JSON formatted output
+        print(json.dumps(result))
+    else:
+        print(json.dumps({'error': 'Failed to predict weather'}))
 
 if __name__ == "__main__":
     main()
