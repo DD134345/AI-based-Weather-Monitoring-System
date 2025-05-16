@@ -178,3 +178,21 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# Virtual Environment
+VIRTUAL/
+*.pyc
+
+# VS Code settings
+.vscode/
+
+# Logs
+sensor_handler.log
+
+# Data files
+data/*.csv
+data/*.json
+
+# Model files
+models/*.pkl
+models/*.h5
