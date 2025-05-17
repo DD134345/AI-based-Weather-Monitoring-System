@@ -2,15 +2,33 @@ const express = require('express');
 const cors = require('cors');
 const { spawn } = require('child_process');
 const path = require('path');
+const compression = require('compression');
+const rateLimit = require('express-rate-limit');
 
 const app = express();
 const port = process.env.PORT || 3001;
 
+// Add compression
+app.use(compression());
+
+// Rate limiting
+const limiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 100 // limit each IP to 100 requests per windowMs
+});
+app.use('/api/', limiter);
+
+// Cache control
+const cacheControl = (req, res, next) => {
+    res.set('Cache-Control', 'public, max-age=300'); // 5 minutes cache
+    next();
+};
+
 app.use(cors());
 app.use(express.json());
-app.use(express.static(path.join(__dirname, 'build')));
+app.use(express.static(path.join(__dirname, 'build'), { maxAge: '1h' }));
 
-app.get('/api/weather', async (req, res) => {
+app.get('/api/weather', cacheControl, async (req, res) => {
     try {
         const { lat, lon } = req.query;
         

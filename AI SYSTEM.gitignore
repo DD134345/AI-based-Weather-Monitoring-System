@@ -135,7 +135,7 @@ celerybeat.pid
 
 # Environments
 .env
-.venv
+.venv/
 env/
 venv/
 ENV/
@@ -188,6 +188,7 @@ VIRTUAL/
 
 # Logs
 sensor_handler.log
+*.log
 
 # Data files
 data/*.csv
