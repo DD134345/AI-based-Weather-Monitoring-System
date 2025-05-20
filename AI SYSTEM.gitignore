@@ -194,8 +194,16 @@ cython_debug/
 .pypirc
 
 # Virtual Environment
-VIRTUAL/
-*.pyc
+.venv/
+.venv
+venv/
+venv
+virtualenv/
+virtualenv
+*env/
+*env
+.python-version
+pyvenv.cfg
 
 # VS Code settings
 .vscode/
