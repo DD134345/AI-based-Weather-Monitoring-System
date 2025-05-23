@@ -1,50 +1,105 @@
-#include <DHT.h>
 #include <Wire.h>
-#include <Adafruit_BME280.h>
+#include "DHT.h"
+#include <Adafruit_BMP085.h>
 #include <ArduinoJson.h>
+#include "BluetoothSerial.h"
 
-#define DHTPIN 2       // DHT11 data pin
-#define DHTTYPE DHT11  // DHT11 sensor type
-#define SEALEVELPRESSURE_HPA (1013.25)
+// Pin Definitions
+#define DHTPIN 13     
+#define DHTTYPE DHT11
 
+// Create objects
 DHT dht(DHTPIN, DHTTYPE);
-Adafruit_BME280 bme;
+Adafruit_BMP085 bmp;
+BluetoothSerial SerialBT;
+
+// Configuration
+const char* deviceName = "WeatherStation";
+unsigned long previousMillis = 0;
+const long interval = 5000;  // Interval between readings (5 seconds)
 
 void setup() {
-    Serial.begin(9600);
-    dht.begin();
-    
-    if (!bme.begin(0x76)) {
-        Serial.println("{\"error\": \"BME280 not found\"}");
-        while (1);
-    }
+  // Initialize Serial communication
+  Serial.begin(115200);
+  
+  // Initialize Bluetooth
+  SerialBT.begin(deviceName);
+  
+  // Initialize sensors
+  dht.begin();
+  if (!bmp.begin()) {
+    Serial.println("Could not find BMP180 sensor!");
+    SerialBT.println("Could not find BMP180 sensor!");
+    while (1) {}
+  }
+  
+  Serial.println("Weather Station Ready!");
+  SerialBT.println("Weather Station Ready!");
+}
+
+void sendSensorData(Stream &output) {
+  StaticJsonDocument<200> doc;
+  
+  // Read DHT11 sensor
+  float temperature = dht.readTemperature();
+  float humidity = dht.readHumidity();
+  
+  // Read BMP180 sensor
+  float pressure = bmp.readPressure() / 100.0F; // Convert to hPa
+  float altitude = bmp.readAltitude();
+  
+  // Check if any reads failed
+  if (isnan(temperature) || isnan(humidity)) {
+    doc["error"] = "Failed to read DHT11";
+  } else {
+    doc["temperature"] = temperature;
+    doc["humidity"] = humidity;
+    doc["pressure"] = pressure;
+    doc["altitude"] = altitude;
+    doc["timestamp"] = millis();
+  }
+  
+  // Send JSON data
+  serializeJson(doc, output);
+  output.println();
 }
 
 void loop() {
-    // Create JSON document
-    StaticJsonDocument<200> doc;
+  unsigned long currentMillis = millis();
+  
+  // Check if it's time to send new data
+  if (currentMillis - previousMillis >= interval) {
+    previousMillis = currentMillis;
     
-    // Read DHT11 sensor
-    float dht_temp = dht.readTemperature();
-    float dht_humidity = dht.readHumidity();
+    // Send data through Serial
+    sendSensorData(Serial);
     
-    // Read BME280 sensor
-    float bme_temp = bme.readTemperature();
-    float bme_humidity = bme.readHumidity();
-    float pressure = bme.readPressure() / 100.0F;
-    
-    // Average temperature and humidity readings
-    float temp = (isnan(dht_temp) ? bme_temp : (dht_temp + bme_temp) / 2);
-    float humidity = (isnan(dht_humidity) ? bme_humidity : (dht_humidity + bme_humidity) / 2);
-    
-    // Package data
-    doc["temperature"] = temp;
-    doc["humidity"] = humidity;
-    doc["pressure"] = pressure;
-    
-    // Send JSON over serial
-    serializeJson(doc, Serial);
-    Serial.println();
-    
-    delay(5000);  // Wait 5 seconds between readings
+    // Send data through Bluetooth
+    sendSensorData(SerialBT);
+  }
+  
+  // Handle incoming commands from both Serial and Bluetooth
+  if (Serial.available()) {
+    String command = Serial.readStringUntil('\n');
+    handleCommand(command, Serial);
+  }
+  
+  if (SerialBT.available()) {
+    String command = SerialBT.readStringUntil('\n');
+    handleCommand(command, SerialBT);
+  }
+}
+
+void handleCommand(String command, Stream &output) {
+  command.trim();
+  
+  if (command == "getData") {
+    sendSensorData(output);
+  }
+  else if (command == "status") {
+    output.println("Weather Station Online");
+  }
+  else {
+    output.println("Unknown command");
+  }
 }
