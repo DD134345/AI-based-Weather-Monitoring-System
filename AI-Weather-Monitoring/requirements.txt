@@ -1,8 +1,13 @@
-numpy==1.23.5
-scipy==1.10.1
-pandas==1.5.3
-scikit-learn==1.2.2
-flask==2.3.3
-python-dotenv==1.0.0
-requests==2.31.0
-pyserial==3.5
+AI-Weather-Monitoring
+├── src
+│   ├── data_processor.py
+│   ├── models
+│   │   └── __init__.py
+│   ├── utils
+│   │   └── __init__.py
+│   └── config
+│       └── __init__.py
+├── tests
+│   └── __init__.py
+├── requirements.txt
+└── README.md

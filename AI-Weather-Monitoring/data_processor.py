@@ -1,9 +1,10 @@
 import pandas as pd
+from typing import Dict, Optional, List
+import logging
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 import numpy as np
 from sklearn.preprocessing import StandardScaler
-from concurrent.futures import ThreadPoolExecutor
-import logging
-from typing import Dict, List, Optional
 
 class WeatherDataProcessor:
     def __init__(self, cache_size: int = 1000):
@@ -31,17 +32,13 @@ class WeatherDataProcessor:
                 'temperature': float(data.get('temperature', 0)),
                 'humidity': float(data.get('humidity', 0)),
                 'pressure': float(data.get('pressure', 0)),
-                'timestamp': data.get('timestamp')
+                'timestamp': datetime.now().isoformat()
             }
             
-            # Async validation
-            future = self.executor.submit(self._validate_data, processed_data)
-            if not future.result():
+            if not self._validate_data(processed_data):
                 return None
                 
-            # Update cache
             self._update_cache(processed_data)
-            
             return processed_data
             
         except Exception as e:
@@ -65,28 +62,18 @@ class WeatherDataProcessor:
         if len(self.data_cache) > self.cache_size:
             self.data_cache.pop(0)
             
-    def prepare_for_prediction(self, data_list, window_size=24):
-        """Prepare data for weather prediction"""
+    def prepare_for_prediction(self, window_size=24) -> Optional[np.ndarray]:
+        """Prepare recent data for weather prediction"""
         try:
-            if not data_list:
+            if len(self.data_cache) < window_size:
                 return None
-                
-            df = pd.DataFrame(data_list)
+
+            recent_data = self.data_cache[-window_size:]
+            features = np.array([[d['temperature'], d['humidity'], d['pressure']] 
+                               for d in recent_data])
             
-            # Calculate rolling averages
-            df['temp_avg_24h'] = df['temperature'].rolling(window=window_size).mean()
-            df['humidity_avg_24h'] = df['humidity'].rolling(window=window_size).mean()
-            df['pressure_avg_24h'] = df['pressure'].rolling(window=window_size).mean()
-            
-            # Calculate rate of change
-            df['temp_change'] = df['temperature'].diff()
-            df['pressure_change'] = df['pressure'].diff()
-            
-            # Drop NaN values
-            df = df.dropna()
-            
-            return df
+            return self.scaler.fit_transform(features)
             
         except Exception as e:
-            self.logger.error(f"Error preparing data for prediction: {e}")
+            self.logger.error(f"Error preparing prediction data: {e}")
             return None
