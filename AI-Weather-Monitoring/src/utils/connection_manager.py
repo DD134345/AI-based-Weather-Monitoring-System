@@ -1,118 +1,129 @@
-from typing import Optional, Dict, List
-import os
-from dotenv import load_dotenv
+from typing import Optional, Dict
 import logging
 import time
-from .serial_connection import SerialConnection
-from .wifi_connection import WiFiConnection
-from .bluetooth_connection import BluetoothConnection
-from src.utils.config_manager import ConfigManager
-from src.utils.connection_monitor import ConnectionMonitor
+from serial import Serial
+import requests
+from bleak import BleakClient
+import asyncio
+from dotenv import load_dotenv
+import os
+from src.utils.logger import LoggerMixin
 
-class ConnectionManager:
+class ConnectionManager(LoggerMixin):
     def __init__(self):
+        super().__init__()  # Initialize logger
         load_dotenv()
-        self.setup_logging()
-        self.connections = {
-            'serial': SerialConnection(),
-            'wifi': WiFiConnection(),
-            'bluetooth': BluetoothConnection()
-        }
+        self.serial_port = os.getenv('ARDUINO_PORT', 'COM3')
+        self.wifi_host = os.getenv('WIFI_HOST', '192.168.4.1')
+        self.bt_device_name = os.getenv('BT_DEVICE_NAME', 'WeatherStation')
         self.active_connection = None
-        self.last_data = None
-        self.last_read_time = 0
-        self.retry_count = 0
-        self.max_retries = 3
-        self.cache_timeout = float(os.getenv('UPDATE_INTERVAL', 5000)) / 1000
-        self.connection_priority = os.getenv('CONNECTION_PRIORITY', 'wifi,bluetooth,serial').split(',')
-        config = ConfigManager()
-        monitor = ConnectionMonitor(self)
-        monitor.start()
+        self.serial = None
+        self.ble_client = None
 
-    def setup_logging(self):
-        self.logger = logging.getLogger(__name__)
-        self.logger.setLevel(os.getenv('LOG_LEVEL', 'INFO'))
-
-    def connect(self, connection_type: str) -> bool:
-        try:
-            connection = self.connections.get(connection_type)
-            if not connection:
-                self.logger.error(f"Unknown connection type: {connection_type}")
-                return False
-
-            self.logger.info(f"Attempting to connect via {connection_type}")
-            success = connection.connect()
-            
-            if success:
-                self.active_connection = connection
-                self.retry_count = 0
-                self.logger.info(f"Successfully connected via {connection_type}")
-            else:
-                self.logger.warning(f"Failed to connect via {connection_type}")
-                
-            return success
-        except Exception as e:
-            self.logger.error(f"Error connecting via {connection_type}: {str(e)}")
-            return False
-
-    def try_reconnect(self) -> bool:
-        if self.retry_count >= self.max_retries:
-            self.logger.error("Max reconnection attempts reached")
-            return False
-
-        self.retry_count += 1
-        for conn_type in self.connection_priority:
-            if self.connect(conn_type):
+    async def connect(self, mode: str = 'auto') -> bool:
+        self.log_info(f"Connecting using {mode} mode...")
+        """Connect using specified mode or try all available modes"""
+        if mode == 'serial':
+            return self.connect_serial()
+        elif mode == 'wifi':
+            return self.connect_wifi()
+        elif mode == 'bluetooth':
+            return await self.connect_bluetooth()
+        else:
+            # Try all connection methods in order
+            if self.connect_serial():
+                return True
+            if self.connect_wifi():
+                return True
+            if await self.connect_bluetooth():
                 return True
         return False
 
-    def read_data(self) -> Optional[Dict]:
-        current_time = time.time()
-        
-        # Return cached data if within timeout
-        if (current_time - self.last_read_time) < self.cache_timeout:
-            return self.last_data
-
-        if not self.active_connection:
-            if not self.try_reconnect():
-                return None
-
+    def connect_serial(self) -> bool:
         try:
-            data = self.active_connection.read_data()
-            if data:
-                self.last_data = data
-                self.last_read_time = current_time
-                self.retry_count = 0
-                return data
-            else:
-                self.logger.warning("No data received")
-                if self.try_reconnect():
-                    return self.read_data()
-                return None
-        except Exception as e:
-            self.logger.error(f"Error reading data: {str(e)}")
-            if self.try_reconnect():
-                return self.read_data()
-            return None
-
-    def disconnect(self) -> bool:
-        try:
-            if self.active_connection:
-                success = self.active_connection.disconnect()
-                if success:
-                    self.active_connection = None
-                    self.last_data = None
-                    self.retry_count = 0
-                return success
+            self.serial = Serial(self.serial_port, 115200, timeout=1)
+            self.active_connection = 'serial'
+            self.log_info("Connected via Serial")
             return True
         except Exception as e:
-            self.logger.error(f"Error disconnecting: {str(e)}")
+            self.log_error(f"Serial connection failed: {e}")
             return False
 
-    def get_connection_status(self) -> Dict:
-        return {
-            'active_connection': self.active_connection.__class__.__name__ if self.active_connection else None,
-            'retry_count': self.retry_count,
-            'last_read_time': self.last_read_time,
-            'has_cached_data': self.last_data is not None
-        }
+    def connect_wifi(self) -> bool:
+        try:
+            response = requests.get(f"http://{self.wifi_host}/data")
+            if response.status_code == 200:
+                self.active_connection = 'wifi'
+                self.log_info("Connected via WiFi")
+                return True
+            return False
+        except Exception as e:
+            self.log_error(f"WiFi connection failed: {e}")
+            return False
+
+    async def connect_bluetooth(self) -> bool:
+        try:
+            self.ble_client = BleakClient(self.bt_device_name)
+            await self.ble_client.connect()
+            self.active_connection = 'bluetooth'
+            self.log_info("Connected via Bluetooth")
+            return True
+        except Exception as e:
+            self.log_error(f"Bluetooth connection failed: {e}")
+            return False
+
+    async def read_data(self) -> Optional[Dict]:
+        """Read data from active connection"""
+        try:
+            if self.active_connection == 'serial':
+                return self._read_serial()
+            elif self.active_connection == 'wifi':
+                return self._read_wifi()
+            elif self.active_connection == 'bluetooth':
+                return await self._read_bluetooth()
+            else:
+                self.log_error("No active connection")
+                return None
+        except Exception as e:
+            self.log_error(f"Error reading data: {e}")
+            return None
+
+    def _read_serial(self) -> Optional[Dict]:
+        if self.serial and self.serial.is_open:
+            try:
+                data = self.serial.readline().decode('utf-8').strip()
+                return eval(data) if data else None
+            except Exception as e:
+                self.log_error(f"Serial read error: {e}")
+        return None
+
+    def _read_wifi(self) -> Optional[Dict]:
+        try:
+            response = requests.get(f"http://{self.wifi_host}/data")
+            return response.json() if response.status_code == 200 else None
+        except Exception as e:
+            self.log_error(f"WiFi read error: {e}")
+            return None
+
+    async def _read_bluetooth(self) -> Optional[Dict]:
+        if self.ble_client and self.ble_client.is_connected:
+            try:
+                data = await self.ble_client.read_gatt_char("181A")
+                return eval(data.decode('utf-8'))
+            except Exception as e:
+                self.log_error(f"Bluetooth read error: {e}")
+        return None
+
+    async def disconnect(self):
+        """Disconnect active connection"""
+        try:
+            if self.active_connection == 'serial':
+                if self.serial and self.serial.is_open:
+                    self.serial.close()
+            elif self.active_connection == 'bluetooth':
+                if self.ble_client and self.ble_client.is_connected:
+                    await self.ble_client.disconnect()
+            self.active_connection = None
+            self.log_info("Disconnected from device")
+        except Exception as e:
+            self.log_error(f"Error disconnecting: {e}")

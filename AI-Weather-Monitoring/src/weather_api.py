@@ -1,5 +1,5 @@
 from flask import Flask, request, jsonify
-from src.weather_predictor import WeatherPredictor
+from src.core.weather_predictor import WeatherPredictor
 import os
 from dotenv import load_dotenv
 
