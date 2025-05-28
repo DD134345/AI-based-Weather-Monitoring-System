@@ -1,3 +1,23 @@
-node_modules
-node_modules
-node_modules
+# Dependencies
+node_modules/
+.venv/
+
+# Environment variables
+.env
+
+# IDE settings
+.vscode/
+*.code-workspace
+.idea/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Logs
+*.log
+
+# Data and model files
+data/
+models/
