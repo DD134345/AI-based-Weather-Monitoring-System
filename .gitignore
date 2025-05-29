@@ -9,11 +9,15 @@ Lib/
 Include/
 pyvenv.cfg
 
+# Large binary files
+*.dll
+*.pyd
+*.so
+
 # Python
 __pycache__/
 *.py[cod]
 *$py.class
-*.so
 
 # Distribution / packaging
 dist/
