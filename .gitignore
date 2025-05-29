@@ -3,9 +3,14 @@ node_modules/
 .venv/
 venv/
 ENV/
+env/
+virtualenv/
+pythonenv*/
 
 # Environment variables
+.env
 .venv
+*.env
 
 # IDE settings
 .vscode/
