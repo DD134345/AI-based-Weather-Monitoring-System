@@ -7,29 +7,27 @@ env/
 virtualenv/
 pythonenv*/
 
-# Environment variables
-.env
-.venv
-*.env
-
-# IDE settings
-.vscode/
-*.code-workspace
-.idea/
-
 # Python
 __pycache__/
 *.py[cod]
 *$py.class
+*.so
 
 # Distribution / packaging
-.Python
-build/
-develop-eggs/
 dist/
-downloads/
-eggs/
-.eggs/
+build/
+*.egg-info/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# IDE specific files
+.vscode/
+.idea/
+*.swp
+*.swo
 
 # Logs
 *.log
