@@ -1,11 +1,13 @@
 # Dependencies
-node_modules/
 .venv/
 venv/
 ENV/
 env/
-virtualenv/
-pythonenv*/
+Scripts/
+Lib/
+Include/
+pyvenv.cfg
+
 
 # Python
 __pycache__/
