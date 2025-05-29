@@ -1,0 +1,426 @@
+import requests
+import pandas as pd
+import numpy as np
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.model_selection import train_test_split
+from datetime import datetime, timedelta
+import os
+from dotenv import load_dotenv
+import json
+import logging
+
+# Load environment variables
+load_dotenv()
+API_KEY = os.getenv('OPENWEATHER_API_KEY')
+
+class WeatherPredictor:
+    def __init__(self):
+        self.model_path = 'weather_model.joblib'
+        self.model = self.load_model() or DecisionTreeClassifier(random_state=42)
+        self.data = []
+        self.setup_logging()
+        self.sensor_handler = None
+        self.use_sensors = False
+    
+    def setup_logging(self):
+        """Configure logging"""
+        logging.basicConfig(
+            filename='weather_predictor.log',
+            level=logging.INFO,
+            format='%(asctime)s - %(levelname)s - %(message)s'
+        )
+        self.logger = logging.getLogger(__name__)
+
+    def save_model(self):
+        """Save trained model to disk"""
+        from joblib import dump
+        try:
+            dump(self.model, self.model_path)
+            self.logger.info("Model saved successfully")
+        except Exception as e:
+            self.logger.error(f"Error saving model: {e}")
+
+    def load_model(self):
+        """Load trained model from disk"""
+        from joblib import load
+        try:
+            if os.path.exists(self.model_path):
+                return load(self.model_path)
+            return None
+        except Exception as e:
+            self.logger.error(f"Error loading model: {e}")
+            return None
+
+    def implement_rate_limiting(self):
+        """Implement basic rate limiting"""
+        from time import time, sleep
+        
+        if not hasattr(self, '_last_request_time'):
+            self._last_request_time = 0
+            
+        # Ensure minimum 1 second between API calls
+        current_time = time()
+        time_since_last = current_time - self._last_request_time
+        
+        if time_since_last < 1:
+            sleep(1 - time_since_last)
+            
+        self._last_request_time = time()
+
+    def get_current_location(self):
+        """Get current location based on IP address"""
+        try:
+            # Add timeout and headers to improve reliability
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+            self.implement_rate_limiting()
+            response = requests.get('https://ipapi.co/json/', 
+                                  timeout=5,
+                                  headers=headers)
+            response.raise_for_status()  # Raise exception for bad status codes
+            data = response.json()
+            
+            if 'error' in data:
+                raise Exception(f"API Error: {data['error']}")
+                
+            return {
+                'city': data.get('city', 'London'),  # Default to London if city not found
+                'lat': data.get('latitude', 51.5074),
+                'lon': data.get('longitude', -0.1278)
+            }
+        except Exception as e:
+            print(f"Error getting location: {e}")
+            # Return default location (London) as fallback
+            return {
+                'city': 'London',
+                'lat': 51.5074,
+                'lon': -0.1278
+            }
+
+    def get_location_input(self):
+        """Get location manually from user input"""
+        print("\nEnter your location details:")
+        city = input("City name: ")
+        lat = float(input("Latitude (e.g. 51.5074 for London): "))
+        lon = float(input("Longitude (e.g. -0.1278 for London): "))
+        return {'city': city, 'lat': lat, 'lon': lon}
+        
+    def predict_from_gps(self, lat, lon):
+        """Predict weather using GPS coordinates"""
+        try:
+            # Get weather data for the GPS location
+            location = {
+                'lat': lat,
+                'lon': lon
+            }
+            
+            # Get current weather data
+            weather_data = self.fetch_weather_data(location)
+            if not weather_data:
+                raise Exception("Failed to fetch weather data")
+            
+            # Validate weather data
+            if not self.validate_weather_data(weather_data):
+                raise Exception("Invalid weather data")
+            
+            # Train model with historical data for this location
+            self.collect_training_data(location)
+            if not self.train_model():
+                raise Exception("Failed to train model")
+            
+            # Make prediction
+            will_rain = self.predict_rain(
+                weather_data['temperature'],
+                weather_data['humidity'],
+                weather_data['pressure']
+            )
+            
+            return {
+                'current': weather_data,
+                'prediction': will_rain
+            }
+            
+        except Exception as e:
+            print(f"Error in prediction: {e}")
+            return None
+    
+    def initialize_sensors(self, port='COM3'):
+        """Initialize connection to Arduino sensors"""
+        from sensor_handler import ArduinoSensorHandler
+        try:
+            self.sensor_handler = ArduinoSensorHandler(port=port)
+            self.use_sensors = self.sensor_handler.connect()
+            return self.use_sensors
+        except Exception as e:
+            self.logger.error(f"Error initializing sensors: {e}")
+            return False
+
+    def fetch_weather_data(self, location):
+        """Fetch weather data from sensors or API"""
+        # Try to get sensor data first
+        if self.use_sensors and self.sensor_handler:
+            sensor_data = self.sensor_handler.read_sensor_data()
+            if sensor_data:
+                return {
+                    'temperature': sensor_data['temperature'],
+                    'humidity': sensor_data['humidity'],
+                    'pressure': sensor_data['pressure'],
+                    'rain': 0  # DHT11/BME280 cannot detect rain
+                }
+        
+        # Fallback to API if no sensor data
+        cached_data = self.get_cached_weather_data(location)
+        if cached_data:
+            return cached_data
+
+        base_url = "http://api.openweathermap.org/data/2.5/weather"
+        params = {
+            'lat': location['lat'],
+            'lon': location['lon'],
+            'appid': API_KEY,
+            'units': 'metric'
+        }
+        
+        try:
+            self.implement_rate_limiting()
+            response = requests.get(base_url, params=params)
+            data = response.json()
+            
+            weather_data = {
+                'temperature': data['main']['temp'],
+                'humidity': data['main']['humidity'],
+                'pressure': data['main']['pressure'],
+                'rain': 1 if 'rain' in data else 0
+            }
+            
+            self.cache_weather_data(location, weather_data)
+            return weather_data
+        except Exception as e:
+            print(f"Error fetching data: {e}")
+            return None
+
+    def validate_weather_data(self, data):
+        """Validate weather data"""
+        try:
+            required = ['temperature', 'humidity', 'pressure']
+            if not all(k in data for k in required):
+                self.logger.error("Missing required weather parameters")
+                return False
+                
+            # Validate ranges
+            valid_ranges = {
+                'temperature': (-50, 60),
+                'humidity': (0, 100),
+                'pressure': (900, 1100)
+            }
+            
+            for param, (min_val, max_val) in valid_ranges.items():
+                if not min_val <= data[param] <= max_val:
+                    self.logger.error(f"Invalid {param} value: {data[param]}")
+                    return False
+                    
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Validation error: {e}")
+            return False
+
+    def collect_training_data(self, location):
+        """Collect historical weather data for training"""
+        try:
+            # Collect last 5 days of weather data
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=5)
+            
+            base_url = "http://api.openweathermap.org/data/2.5/onecall/timemachine"
+            
+            historical_data = []
+            current_date = start_date
+            
+            while current_date <= end_date:
+                params = {
+                    'lat': location['lat'],
+                    'lon': location['lon'],
+                    'dt': int(current_date.timestamp()),
+                    'appid': API_KEY,
+                    'units': 'metric'
+                }
+                
+                self.implement_rate_limiting()
+                response = requests.get(base_url, params=params)
+                data = response.json()
+                
+                if 'current' in data:
+                    weather = data['current']
+                    historical_data.append({
+                        'temperature': weather['temp'],
+                        'humidity': weather['humidity'],
+                        'pressure': weather['pressure'],
+                        'rain': 1 if 'rain' in weather else 0
+                    })
+                
+                current_date += timedelta(days=1)
+            
+            self.data = historical_data
+            return True
+            
+        except Exception as e:
+            print(f"Error collecting training data: {e}")
+            return False
+
+    def train_model(self):
+        """Train the weather prediction model"""
+        try:
+            if not self.data:
+                return False
+                
+            df = pd.DataFrame(self.data)
+            X = df[['temperature', 'humidity', 'pressure']]
+            y = df['rain']
+            
+            self.model.fit(X, y)
+            self.save_model()
+            return True
+            
+        except Exception as e:
+            print(f"Error training model: {e}")
+            return False
+
+    def predict_rain(self, temperature, humidity, pressure):
+        """Predict if it will rain based on current conditions"""
+        try:
+            prediction = self.model.predict([[temperature, humidity, pressure]])
+            return bool(prediction[0])
+        except Exception as e:
+            print(f"Error making prediction: {e}")
+            return False
+
+    def cache_weather_data(self, location, data, duration=300):
+        """Cache weather data for 5 minutes"""
+        cache_key = f"{location['lat']}_{location['lon']}"
+        cache_file = f"cache_{cache_key}.json"
+        
+        cache_data = {
+            'timestamp': datetime.now().timestamp(),
+            'data': data
+        }
+        
+        try:
+            with open(cache_file, 'w') as f:
+                json.dump(cache_data, f)
+        except Exception as e:
+            self.logger.error(f"Cache error: {e}")
+
+    def get_cached_weather_data(self, location):
+        """Get cached weather data if available and fresh"""
+        cache_key = f"{location['lat']}_{location['lon']}"
+        cache_file = f"cache_{cache_key}.json"
+        
+        try:
+            if os.path.exists(cache_file):
+                with open(cache_file, 'r') as f:
+                    cache = json.load(f)
+                    
+                if datetime.now().timestamp() - cache['timestamp'] < 300:
+                    return cache['data']
+            return None
+        except Exception as e:
+            self.logger.error(f"Cache read error: {e}")
+            return None
+
+    def evaluate_model(self, X_test, y_test):
+        """Evaluate model performance"""
+        from sklearn.metrics import accuracy_score, precision_score, recall_score
+        
+        try:
+            y_pred = self.model.predict(X_test)
+            
+            metrics = {
+                'accuracy': accuracy_score(y_test, y_pred),
+                'precision': precision_score(y_test, y_pred),
+                'recall': recall_score(y_test, y_pred)
+            }
+            
+            self.logger.info(f"Model metrics: {metrics}")
+            return metrics
+            
+        except Exception as e:
+            self.logger.error(f"Evaluation error: {e}")
+            return None
+
+    def process_sensor_data(self, data):
+        """Process incoming sensor data"""
+        try:
+            if not data:
+                return None
+                
+            processed_data = {
+                'temperature': data.get('temperature'),
+                'humidity': data.get('humidity'),
+                'pressure': data.get('pressure'),
+                'timestamp': datetime.now().isoformat()
+            }
+            
+            self.data.append(processed_data)
+            return processed_data
+        except Exception as e:
+            self.logger.error(f"Error processing sensor data: {e}")
+            return None
+
+    def predict_weather(self):
+        """Generate weather prediction based on sensor data"""
+        try:
+            if len(self.data) < 24:  # Need at least 24 hours of data
+                return "Insufficient data for prediction"
+                
+            recent_data = pd.DataFrame(self.data[-24:])
+            X = recent_data[['temperature', 'humidity', 'pressure']]
+            prediction = self.model.predict(X)
+            
+            return self.decode_prediction(prediction[0])
+        except Exception as e:
+            self.logger.error(f"Error making prediction: {e}")
+            return "Prediction error"
+
+    def decode_prediction(self, code):
+        """Convert prediction code to weather description"""
+        weather_codes = {
+            0: "Sunny",
+            1: "Partly Cloudy",
+            2: "Rain",
+            3: "Heavy Rain"
+        }
+        return weather_codes.get(code, "Unknown")
+
+def main():
+    if not API_KEY:
+        print("Please set your OpenWeatherMap API key in the .env file")
+        return
+    
+    # Add command line argument parsing
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--lat', type=float, required=True)
+    parser.add_argument('--lon', type=float, required=True)
+    parser.add_argument('--use-sensors', action='store_true', help='Use Arduino sensors')
+    parser.add_argument('--port', default='COM3', help='Arduino serial port')
+    args = parser.parse_args()
+    
+    predictor = WeatherPredictor()
+    
+    if args.use_sensors:
+        if not predictor.initialize_sensors(port=args.port):
+            print(json.dumps({'error': 'Failed to initialize sensors'}))
+            return
+    
+    # Use provided coordinates
+    result = predictor.predict_from_gps(args.lat, args.lon)
+    
+    if result:
+        print(json.dumps(result))
+    else:
+        print(json.dumps({'error': 'Failed to predict weather'}))
+
+if __name__ == "__main__":
+    main()

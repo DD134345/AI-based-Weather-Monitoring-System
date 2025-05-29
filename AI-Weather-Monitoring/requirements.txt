@@ -1,0 +1,7 @@
+pyserial==3.5
+bleak==0.20.2
+aiohttp==3.8.4
+python-dotenv==1.0.0
+numpy==1.23.5
+scikit-learn==1.2.2
+tensorflow-intel==2.12.0
