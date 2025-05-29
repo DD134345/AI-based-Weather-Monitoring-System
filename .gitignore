@@ -1,4 +1,5 @@
 # Dependencies
+# Virtual Environment
 .venv/
 venv/
 ENV/
@@ -7,7 +8,6 @@ Scripts/
 Lib/
 Include/
 pyvenv.cfg
-
 
 # Python
 __pycache__/

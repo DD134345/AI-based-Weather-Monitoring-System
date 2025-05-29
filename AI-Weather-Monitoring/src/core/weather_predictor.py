@@ -1,20 +1,16 @@
 import numpy as np
 from sklearn.ensemble import RandomForestRegressor
-from datetime import datetime, timedelta
-import requests
+from datetime import datetime
 import os
 from dotenv import load_dotenv
-import logging
 import joblib
 from typing import Dict, Optional, List
-import json
 from src.utils.logger import LoggerMixin
 
 class WeatherPredictor(LoggerMixin):
     def __init__(self):
         super().__init__()
         load_dotenv()
-        self.api_key = os.getenv('OPENWEATHER_API_KEY')
         self.model_path = os.getenv('MODEL_PATH', 'models/weather_model.joblib')
         self.model = self._load_model() or RandomForestRegressor(
             n_estimators=100,
@@ -22,7 +18,6 @@ class WeatherPredictor(LoggerMixin):
             random_state=42
         )
         self.data = []
-        self._last_request_time = 0
 
     def _load_model(self) -> Optional[RandomForestRegressor]:
         try:

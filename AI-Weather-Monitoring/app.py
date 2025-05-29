@@ -1,12 +1,10 @@
 import asyncio
 from datetime import datetime
-import json
 import os
 from dotenv import load_dotenv
 from src.connections.device_manager import DeviceManager
 from src.core.weather_predictor import WeatherPredictor
 from src.utils.logger import setup_logging
-from src.utils.connection_manager import ConnectionManager
 
 async def main():
     # Load environment variables
@@ -19,7 +17,6 @@ async def main():
     )
     
     # Initialize components
-    connection_manager = ConnectionManager()
     device = DeviceManager()
     predictor = WeatherPredictor()
     
@@ -54,9 +51,6 @@ async def main():
                     logger.info(f"Current: {result['current']}")
                     logger.info(f"Prediction: {result['prediction']}")
                     
-                    # Save current state for API
-                    save_current_state(result)
-                    
             await asyncio.sleep(int(os.getenv('UPDATE_INTERVAL', '5')))
             
     except KeyboardInterrupt:
@@ -65,15 +59,6 @@ async def main():
     except Exception as e:
         logger.error(f"Error in main loop: {e}")
         await device.disconnect()
-
-def save_current_state(data: dict):
-    """Save current weather state to file for API access"""
-    try:
-        os.makedirs('data', exist_ok=True)
-        with open('data/current_state.json', 'w') as f:
-            json.dump(data, f)
-    except Exception as e:
-        print(f"Error saving state: {e}")
 
 if __name__ == '__main__':
     asyncio.run(main())
