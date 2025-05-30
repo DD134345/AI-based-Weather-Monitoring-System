@@ -8,6 +8,12 @@ import os
 from dotenv import load_dotenv
 import json
 import logging
+import asyncio
+from typing import List, Dict, Optional
+from concurrent.futures import ThreadPoolExecutor
+from sklearn.ensemble import RandomForestRegressor
+import joblib
+import serial
 
 # Load environment variables
 load_dotenv()
@@ -15,12 +21,17 @@ API_KEY = os.getenv('OPENWEATHER_API_KEY')
 
 class WeatherPredictor:
     def __init__(self):
-        self.model_path = 'weather_model.joblib'
-        self.model = self.load_model() or DecisionTreeClassifier(random_state=42)
-        self.data = []
+        self.model_path = 'models/weather_model.joblib'
+        # Use RandomForest instead of DecisionTree for better predictions
+        self.model = self.load_model() or RandomForestRegressor(
+            n_estimators=100,
+            max_depth=15,
+            random_state=42
+        )
+        self.data_buffer = []
+        self.buffer_size = 1000  # Store more historical data
+        self.thread_pool = ThreadPoolExecutor(max_workers=4)
         self.setup_logging()
-        self.sensor_handler = None
-        self.use_sensors = False
     
     def setup_logging(self):
         """Configure logging"""
@@ -147,7 +158,6 @@ class WeatherPredictor:
     
     def initialize_sensors(self, port='COM3'):
         """Initialize connection to Arduino sensors"""
-        from sensor_handler import ArduinoSensorHandler
         try:
             self.sensor_handler = ArduinoSensorHandler(port=port)
             self.use_sensors = self.sensor_handler.connect()
@@ -392,35 +402,168 @@ class WeatherPredictor:
             3: "Heavy Rain"
         }
         return weather_codes.get(code, "Unknown")
+    
+    async def process_sensor_stream(self, sensor_data: Dict):
+        """Process incoming sensor data asynchronously"""
+        try:
+            # Process in thread pool to avoid blocking
+            processed = await asyncio.get_event_loop().run_in_executor(
+                self.thread_pool,
+                self._process_data_point,
+                sensor_data
+            )
+            
+            if processed:
+                self.data_buffer.append(processed)
+                if len(self.data_buffer) > self.buffer_size:
+                    self.data_buffer.pop(0)
+                    
+                # Retrain model if enough new data
+                if len(self.data_buffer) % 100 == 0:
+                    await self.train_model_async()
+                    
+            return processed
+        except Exception as e:
+            self.logger.error(f"Error processing sensor data: {e}")
+            return None
 
-def main():
-    if not API_KEY:
-        print("Please set your OpenWeatherMap API key in the .env file")
-        return
-    
-    # Add command line argument parsing
-    import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--lat', type=float, required=True)
-    parser.add_argument('--lon', type=float, required=True)
-    parser.add_argument('--use-sensors', action='store_true', help='Use Arduino sensors')
-    parser.add_argument('--port', default='COM3', help='Arduino serial port')
-    args = parser.parse_args()
-    
-    predictor = WeatherPredictor()
-    
-    if args.use_sensors:
-        if not predictor.initialize_sensors(port=args.port):
-            print(json.dumps({'error': 'Failed to initialize sensors'}))
-            return
-    
-    # Use provided coordinates
-    result = predictor.predict_from_gps(args.lat, args.lon)
-    
-    if result:
-        print(json.dumps(result))
-    else:
-        print(json.dumps({'error': 'Failed to predict weather'}))
+    def _process_data_point(self, data: Dict) -> Optional[Dict]:
+        """Process single data point with validation"""
+        try:
+            if not self.validate_weather_data(data):
+                return None
+                
+            return {
+                'temperature': float(data['temperature']),
+                'humidity': float(data['humidity']), 
+                'pressure': float(data['pressure']),
+                'timestamp': data.get('timestamp')
+            }
+        except Exception as e:
+            self.logger.error(f"Error processing data point: {e}")
+            return None
+
+    async def predict_next_week(self) -> List[Dict]:
+        """Predict weather for next 7 days"""
+        try:
+            if len(self.data_buffer) < 24:  # Need at least 24 hours of data
+                return []
+                
+            # Get recent trends
+            recent_data = np.array([
+                [d['temperature'], d['humidity'], d['pressure']]
+                for d in self.data_buffer[-24:]
+            ])
+            
+            predictions = []
+            current = recent_data[-1]  # Start from latest reading
+            
+            # Predict next 7 days in 3-hour intervals
+            intervals = 7 * 8  # 7 days * 8 three-hour intervals
+            for i in range(intervals):
+                # Predict next values using rolling window
+                prediction = await asyncio.get_event_loop().run_in_executor(
+                    self.thread_pool,
+                    self.model.predict,
+                    current.reshape(1, -1)
+                )
+                
+                weather_code = self._get_weather_code(
+                    prediction[0][0],  # temperature
+                    prediction[0][1],  # humidity
+                    prediction[0][2]   # pressure
+                )
+                
+                predictions.append({
+                    'hours_from_now': i * 3,
+                    'temperature': float(prediction[0][0]),
+                    'humidity': float(prediction[0][1]),
+                    'pressure': float(prediction[0][2]),
+                    'condition': self.decode_prediction(weather_code)
+                })
+                
+                current = prediction[0]  # Use prediction as next input
+                
+            return predictions
+            
+        except Exception as e:
+            self.logger.error(f"Prediction error: {e}")
+            return []
+
+    def _get_weather_code(self, temp: float, humidity: float, pressure: float) -> int:
+        """Determine weather code from conditions"""
+        # Enhanced weather classification logic
+        if pressure < 1000:  # Low pressure system
+            if humidity > 80:
+                return 3  # Heavy Rain
+            return 2  # Rain Likely
+        elif humidity > 85:
+            return 1  # Partly Cloudy
+        return 0  # Clear
+
+    async def train_model_async(self):
+        """Train model asynchronously"""
+        try:
+            if len(self.data_buffer) < 100:
+                return False
+                
+            data = np.array([
+                [d['temperature'], d['humidity'], d['pressure']]
+                for d in self.data_buffer
+            ])
+            
+            # Use previous values to predict next values
+            X = data[:-1]
+            y = data[1:]
+            
+            await asyncio.get_event_loop().run_in_executor(
+                self.thread_pool,
+                self._train_model,
+                X, y
+            )
+            
+            return True
+        except Exception as e:
+            self.logger.error(f"Training error: {e}")
+            return False
+
+    def _train_model(self, X, y):
+        """Train model in thread pool"""
+        self.model.fit(X, y)
+        joblib.dump(self.model, self.model_path)
+
+class ArduinoSensorHandler:
+    def __init__(self, port='COM3', baud_rate=9600):
+        self.port = port
+        self.baud_rate = baud_rate
+        self.serial = None
+
+    def connect(self):
+        """Connect to Arduino via serial port"""
+        try:
+            self.serial = serial.Serial(self.port, self.baud_rate)
+            return True
+        except Exception as e:
+            print(f"Error connecting to Arduino: {e}")
+            return False
+
+    def read_sensor_data(self):
+        """Read sensor data from Arduino"""
+        try:
+            if not self.serial or not self.serial.is_open:
+                return None
+            
+            # Read line from Arduino
+            data = self.serial.readline().decode().strip()
+            return json.loads(data)
+            
+        except Exception as e:
+            print(f"Error reading sensor data: {e}")
+            return None
+
+async def main():
+    handler = ArduinoSensorHandler()
+    await handler.connect()
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

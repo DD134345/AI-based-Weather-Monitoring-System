@@ -4,11 +4,17 @@
 #include <DHT.h>
 #include <Adafruit_BMP085.h>
 #include <ArduinoJson.h>
+#include <SPIFFS.h>
+#include <AsyncTCP.h>
+#include <ESPAsyncWebServer.h>
 
 // Pin configuration
 #define DHTPIN 13
 #define DHTTYPE DHT11
 #define LED_PIN 2
+
+// Data buffer size
+#define BUFFER_SIZE 60  // Store 5 minutes of data (5s intervals)
 
 // Sensors
 DHT dht(DHTPIN, DHTTYPE);
@@ -24,8 +30,33 @@ BLECharacteristic* pCharacteristic = NULL;
 #define SERVICE_UUID "181A"
 #define CHAR_UUID "2A6E"
 
+// Web server
+AsyncWebServer server(80);
+
+// Data buffer
+struct WeatherData {
+    float temperature;
+    float humidity;
+    float pressure;
+    unsigned long timestamp;
+};
+WeatherData dataBuffer[BUFFER_SIZE];
+int bufferIndex = 0;
+
+// Task handles
+TaskHandle_t sensorTaskHandle = NULL;
+TaskHandle_t bleTaskHandle = NULL;
+
 void setup() {
     Serial.begin(115200);
+    
+    // Initialize SPIFFS for data storage
+    if(!SPIFFS.begin(true)) {
+        Serial.println("SPIFFS Mount Failed");
+        return;
+    }
+    
+    // Initialize pins
     pinMode(LED_PIN, OUTPUT);
     
     // Initialize sensors
@@ -35,32 +66,167 @@ void setup() {
         while (1) { delay(10); }
     }
     
+    // Setup network connections
     setupWiFi();
     setupBLE();
+    setupWebServer();
+    
+    // Create sensor reading task on core 0
+    xTaskCreatePinnedToCore(
+        sensorTask,
+        "SensorTask",
+        4096,
+        NULL,
+        1,
+        &sensorTaskHandle,
+        0
+    );
+    
+    // Create BLE task on core 1
+    xTaskCreatePinnedToCore(
+        bleTask,
+        "BLETask",
+        4096,
+        NULL,
+        1,
+        &bleTaskHandle,
+        1
+    );
 }
 
 void loop() {
-    // Read sensors
-    float temp = dht.readTemperature();
-    float humidity = dht.readHumidity();
-    float pressure = bmp.readPressure() / 100.0F;
+    // Main loop is now empty as tasks handle the work
+    delay(10);
+}
+
+void sensorTask(void *parameter) {
+    TickType_t xLastWakeTime = xTaskGetTickCount();
     
-    // Create JSON
-    StaticJsonDocument<200> doc;
-    doc["temperature"] = temp;
-    doc["humidity"] = humidity;
-    doc["pressure"] = pressure;
+    while(true) {
+        // Read sensors with error checking
+        float temp = dht.readTemperature();
+        float humidity = dht.readHumidity();
+        float pressure = bmp.readPressure() / 100.0F;
+        
+        if (!isnan(temp) && !isnan(humidity) && pressure > 0) {
+            // Store data in buffer
+            dataBuffer[bufferIndex].temperature = temp;
+            dataBuffer[bufferIndex].humidity = humidity;
+            dataBuffer[bufferIndex].pressure = pressure;
+            dataBuffer[bufferIndex].timestamp = millis();
+            
+            bufferIndex = (bufferIndex + 1) % BUFFER_SIZE;
+            
+            // Save to SPIFFS periodically
+            if (bufferIndex == 0) {
+                saveDataToSPIFFS();
+            }
+            
+            // Toggle LED to indicate successful reading
+            digitalWrite(LED_PIN, !digitalRead(LED_PIN));
+        }
+        
+        // Run task every 5 seconds
+        vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(5000));
+    }
+}
+
+void bleTask(void *parameter) {
+    TickType_t xLastWakeTime = xTaskGetTickCount();
     
-    String jsonString;
-    serializeJson(doc, jsonString);
+    while(true) {
+        if (pCharacteristic) {
+            // Get latest data
+            WeatherData latest = dataBuffer[(bufferIndex - 1 + BUFFER_SIZE) % BUFFER_SIZE];
+            
+            // Create JSON
+            StaticJsonDocument<200> doc;
+            doc["temperature"] = latest.temperature;
+            doc["humidity"] = latest.humidity;
+            doc["pressure"] = latest.pressure;
+            doc["timestamp"] = latest.timestamp;
+            
+            String jsonString;
+            serializeJson(doc, jsonString);
+            
+            // Update BLE characteristic
+            pCharacteristic->setValue(jsonString.c_str());
+            pCharacteristic->notify();
+        }
+        
+        // Run task every 1 second
+        vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(1000));
+    }
+}
+
+void setupWebServer() {
+    // Serve current data
+    server.on("/data", HTTP_GET, [](AsyncWebServerRequest *request) {
+        WeatherData latest = dataBuffer[(bufferIndex - 1 + BUFFER_SIZE) % BUFFER_SIZE];
+        
+        StaticJsonDocument<200> doc;
+        doc["temperature"] = latest.temperature;
+        doc["humidity"] = latest.humidity;
+        doc["pressure"] = latest.pressure;
+        doc["timestamp"] = latest.timestamp;
+        
+        String jsonString;
+        serializeJson(doc, jsonString);
+        
+        request->send(200, "application/json", jsonString);
+    });
     
-    // Send data
-    Serial.println(jsonString);
-    if (pCharacteristic) {
-        pCharacteristic->setValue(jsonString.c_str());
+    // Serve historical data
+    server.on("/history", HTTP_GET, [](AsyncWebServerRequest *request) {
+        String jsonArray = "[";
+        for(int i = 0; i < BUFFER_SIZE; i++) {
+            if (dataBuffer[i].timestamp > 0) {
+                StaticJsonDocument<200> doc;
+                doc["temperature"] = dataBuffer[i].temperature;
+                doc["humidity"] = dataBuffer[i].humidity;
+                doc["pressure"] = dataBuffer[i].pressure;
+                doc["timestamp"] = dataBuffer[i].timestamp;
+                
+                String jsonString;
+                serializeJson(doc, jsonString);
+                
+                if (i > 0) jsonArray += ",";
+                jsonArray += jsonString;
+            }
+        }
+        jsonArray += "]";
+        
+        request->send(200, "application/json", jsonArray);
+    });
+    
+    server.begin();
+}
+
+void saveDataToSPIFFS() {
+    File file = SPIFFS.open("/data.json", "w");
+    if(!file) {
+        return;
     }
     
-    // Activity indicator
-    digitalWrite(LED_PIN, !digitalRead(LED_PIN));
-    delay(5000);
+    // Save entire buffer
+    String jsonArray = "[";
+    for(int i = 0; i < BUFFER_SIZE; i++) {
+        if (dataBuffer[i].timestamp > 0) {
+            StaticJsonDocument<200> doc;
+            doc["temperature"] = dataBuffer[i].temperature;
+            doc["humidity"] = dataBuffer[i].humidity;
+            doc["pressure"] = dataBuffer[i].pressure;
+            doc["timestamp"] = dataBuffer[i].timestamp;
+            
+            String jsonString;
+            serializeJson(doc, jsonString);
+            
+            if (i > 0) jsonArray += ",";
+            jsonArray += jsonString;
+        }
+    }
+    jsonArray += "]";
+    
+    file.print(jsonArray);
+    file.close();
 }
