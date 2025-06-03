@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from datetime import datetime
+import click
 from typing import Optional
 from config import config
 from src.connections.device_manager import DeviceManager
@@ -79,3 +80,23 @@ class SystemManager:
         self.running = False
         await self.device.disconnect()
         self.logger.info("System stopped")
+
+@click.group()
+def cli():
+    """Weather Monitoring System CLI"""
+    pass
+
+@cli.command()
+def start():
+    """Start the weather monitoring system"""
+    manager = SystemManager()
+    asyncio.run(manager.start())
+
+@cli.command()
+def check():
+    """Check system status"""
+    manager = SystemManager()
+    manager.check_status()
+
+if __name__ == '__main__':
+    cli()
