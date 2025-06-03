@@ -14,10 +14,18 @@ def setup_environment():
         subprocess.run([".venv/bin/pip", "install", "-e", "."])
 
     # Create necessary directories
-    os.makedirs("logs", exist_ok=True)
-    os.makedirs("models", exist_ok=True)
-    os.makedirs("data", exist_ok=True)
-    os.makedirs("cache", exist_ok=True)
+    directories = [
+        "logs",
+        "models",
+        "data",
+        "cache",
+        "AI-Weather-Monitoring/src/core",
+        "AI-Weather-Monitoring/src/connections",
+        "AI-Weather-Monitoring/src/utils"
+    ]
+    
+    for directory in directories:
+        os.makedirs(directory, exist_ok=True)
 
 if __name__ == "__main__":
     setup_environment()
