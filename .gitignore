@@ -13,6 +13,7 @@ pyvenv.cfg
 *.dll
 *.pyd
 *.so
+flutter.zip
 
 # Python
 __pycache__/
