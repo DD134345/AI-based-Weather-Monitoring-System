@@ -1,15 +1,52 @@
-class App : Application() {
-    companion object {
-        lateinit var instance: App
-            private set
-    }
+\AI-based-Weather-Monitoring-System\AI-Weather-Monitoring\android_app\src\main\java\com\weathermonitoring\WeatherApp.kt
+package com.weathermonitoring
 
+import android.app.Application
+import android.bluetooth.BluetoothDevice
+import androidx.appcompat.app.AppCompatActivity
+import android.os.Bundle
+import androidx.activity.viewModels
+import androidx.lifecycle.*
+import com.github.mikephil.charting.charts.LineChart
+import com.weathermonitoring.databinding.ActivityMainBinding
+import kotlinx.coroutines.launch
+
+// Application class
+class WeatherApp : Application() {
+    companion object {
+        lateinit var instance: WeatherApp private set
+    }
     override fun onCreate() {
         super.onCreate()
         instance = this
     }
 }
 
+// Data model
+data class WeatherData(
+    val temperature: Float,
+    val humidity: Float,
+    val pressure: Float,
+    val timestamp: Long = System.currentTimeMillis()
+)
+
+// ViewModel
+class WeatherViewModel : ViewModel() {
+    private val _weatherData = MutableLiveData<WeatherData>()
+    val weatherData: LiveData<WeatherData> = _weatherData
+    
+    private val bluetoothManager by lazy { BluetoothManager(WeatherApp.instance) }
+    
+    fun connectToDevice(device: BluetoothDevice) = viewModelScope.launch {
+        bluetoothManager.connect(device)
+    }
+    
+    fun refreshData() = viewModelScope.launch {
+        bluetoothManager.requestUpdate()
+    }
+}
+
+// Main Activity
 class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
     private val viewModel: WeatherViewModel by viewModels()
@@ -27,9 +64,7 @@ class MainActivity : AppCompatActivity() {
     private fun setupUI() {
         setupChart()
         binding.fab.setOnClickListener { showBluetoothDevices() }
-        binding.swipeRefresh.setOnRefreshListener { 
-            viewModel.refreshData()
-        }
+        binding.swipeRefresh.setOnRefreshListener { viewModel.refreshData() }
     }
 
     private fun setupChart() {
@@ -39,9 +74,6 @@ class MainActivity : AppCompatActivity() {
             setDrawGridBackground(false)
             setDrawBorders(false)
             animateX(1000)
-            legend.textColor = ContextCompat.getColor(context, R.color.textColor)
-            xAxis.textColor = ContextCompat.getColor(context, R.color.textColor)
-            axisLeft.textColor = ContextCompat.getColor(context, R.color.textColor)
         }
     }
 
