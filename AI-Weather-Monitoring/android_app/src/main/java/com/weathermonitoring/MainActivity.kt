@@ -73,99 +73,22 @@ class MainActivity : AppCompatActivity() {
         
         setupUI()
         observeData()
-        checkPermissions()
     }
 
     private fun setupUI() {
-        setupConnectionOptions()
-        setupChart()
-        binding.swipeRefresh.setOnRefreshListener { viewModel.refreshData() }
-    }
-
-    private fun setupConnectionOptions() {
-        binding.bluetoothChip.setOnClickListener {
-            showBluetoothDevices()
-        }
-
-        binding.wifiChip.setOnClickListener {
-            showWifiDialog()
-        }
-
-        binding.serialChip.setOnClickListener {
-            showSerialDialog()
-        }
-    }
-
-    private fun showWifiDialog() {
-        MaterialAlertDialogBuilder(this)
-            .setTitle("WiFi Connection")
-            .setView(R.layout.dialog_wifi_connection)
-            .setPositiveButton("Connect") { dialog, _ ->
-                val ipAddress = (dialog as? AlertDialog)?.findViewById<TextInputEditText>(R.id.ipAddress)?.text.toString()
-                viewModel.connectWifi(ipAddress)
+        binding.apply {
+            connectButton.setOnClickListener { 
+                viewModel.connect(selectedConnectionType) 
             }
-            .show()
-    }
-
-    private fun showSerialDialog() {
-        // Only available when connected via USB
-        if (!UsbSerialDriver.isSupported(this)) {
-            Toast.makeText(this, "USB Serial connection not supported", Toast.LENGTH_SHORT).show()
-            return
+            refreshButton.setOnClickListener { 
+                viewModel.refreshData() 
+            }
         }
-        viewModel.connectSerial()
     }
 
     private fun observeData() {
-        viewModel.connectionStatus.observe(this) { status ->
-            binding.connectionStatus.text = status
-        }
-
         viewModel.weatherData.observe(this) { data ->
-            updateUI(data)
-            binding.swipeRefresh.isRefreshing = false
+            updateDisplay(data)
         }
-    }
-
-    private fun updateUI(data: WeatherData) {
-        binding.apply {
-            temperatureValue.text = getString(R.string.temperature_format, data.temperature)
-            humidityValue.text = getString(R.string.humidity_format, data.humidity)
-            pressureValue.text = getString(R.string.pressure_format, data.pressure)
-        }
-        updateChart(data)
-    }
-
-    private fun updateChart(data: WeatherData) {
-        // Update chart with new data point
-        val chart = binding.chart
-        val entry = Entry(data.timestamp.toFloat(), data.temperature)
-        // Add entry to dataset and notify chart
-        // ... (chart update logic)
-    }
-
-    private fun checkPermissions() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            requestPermissions(
-                arrayOf(
-                    Manifest.permission.BLUETOOTH_SCAN,
-                    Manifest.permission.BLUETOOTH_CONNECT,
-                    Manifest.permission.ACCESS_FINE_LOCATION
-                ),
-                PERMISSION_REQUEST_CODE
-            )
-        }
-    }
-
-    private fun showBluetoothDevices() {
-        if (!checkPermissions()) {
-            requestPermissions()
-            return
-        }
-        BluetoothDeviceListDialog().show(supportFragmentManager, null)
-    }
-
-    companion object {
-        private const val PERMISSION_REQUEST_CODE = 123
     }
 }

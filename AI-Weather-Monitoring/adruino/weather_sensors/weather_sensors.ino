@@ -49,6 +49,7 @@ TaskHandle_t bleTaskHandle = NULL;
 
 const unsigned long FAST_SAMPLING_INTERVAL = 5000; // 5 seconds
 const unsigned long SLOW_SAMPLING_INTERVAL = 3600000; // 1 hour
+const unsigned long UPDATE_INTERVAL = 10000; // 10 seconds
 
 void setup() {
     Serial.begin(115200);
@@ -73,33 +74,22 @@ void setup() {
     setupWiFi();
     setupBLE();
     setupWebServer();
-    
-    // Create sensor reading task on core 0
-    xTaskCreatePinnedToCore(
-        sensorTask,
-        "SensorTask",
-        4096,
-        NULL,
-        1,
-        &sensorTaskHandle,
-        0
-    );
-    
-    // Create BLE task on core 1
-    xTaskCreatePinnedToCore(
-        bleTask,
-        "BLETask",
-        4096,
-        NULL,
-        1,
-        &bleTaskHandle,
-        1
-    );
 }
 
 void loop() {
-    // Main loop is now empty as tasks handle the work
-    delay(10);
+    static unsigned long lastReading = 0;
+    unsigned long currentTime = millis();
+    
+    if (currentTime - lastReading >= UPDATE_INTERVAL) {
+        float temp = dht.readTemperature();
+        float humidity = dht.readHumidity();
+        float pressure = bmp.readPressure() / 100.0F;
+        
+        if (isValidReading(temp, humidity, pressure)) {
+            sendData(temp, humidity, pressure);
+            lastReading = currentTime;
+        }
+    }
 }
 
 void sensorTask(void *parameter) {

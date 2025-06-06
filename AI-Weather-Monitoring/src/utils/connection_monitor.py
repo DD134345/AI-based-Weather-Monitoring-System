@@ -1,6 +1,25 @@
 from typing import Dict, Callable
 import time
 import threading
+import logging
+
+class ConnectionManager:
+    def __init__(self):
+        self.current_connection = None
+        self.logger = logging.getLogger(__name__)
+
+    async def connect(self, connection_type: str, **params) -> bool:
+        try:
+            if connection_type == 'bluetooth':
+                return await self._connect_bluetooth(params['device_name'])
+            elif connection_type == 'wifi':
+                return await self._connect_wifi(params['host'])
+            elif connection_type == 'serial':
+                return self._connect_serial(params['port'], params['baudrate'])
+            return False
+        except Exception as e:
+            self.logger.error(f"Connection error: {e}")
+            return False
 
 class ConnectionMonitor:
     def __init__(self, connection_manager, check_interval: float = 5.0):

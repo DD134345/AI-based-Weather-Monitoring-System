@@ -333,67 +333,6 @@ class EnhancedWeatherSystem:
             self.logger.error(f"Validation error: {e}")
             return False
 
-# Device Connection Manager
-class DeviceManager:
-    def __init__(self):
-        self.logger = logging.getLogger(__name__)
-        self.connection_type = None
-        self.serial_conn = None
-        self.ble_client = None
-        self.wifi_url = None
-
-    async def connect(self, connection_type: str, **kwargs) -> bool:
-        self.connection_type = connection_type
-        if connection_type == 'serial':
-            return self._connect_serial(kwargs['port'], kwargs['baudrate'])
-        elif connection_type == 'bluetooth':
-            return await self._connect_bluetooth(kwargs['device_name'])
-        elif connection_type == 'wifi':
-            return await self._connect_wifi(kwargs['ip'])
-        return False
-
-    def _connect_serial(self, port: str, baudrate: int) -> bool:
-        try:
-            self.serial_conn = serial.Serial(port, baudrate, timeout=1)
-            return True
-        except Exception as e:
-            self.logger.error(f"Serial connection failed: {e}")
-            return False
-
-    async def _connect_bluetooth(self, device_name: str) -> bool:
-        try:
-            device = await BleakScanner.find_device_by_name(device_name)
-            if device:
-                self.ble_client = BleakClient(device.address)
-                await self.ble_client.connect()
-                return True
-            return False
-        except Exception as e:
-            self.logger.error(f"Bluetooth connection failed: {e}")
-            return False
-
-    async def read_data(self) -> Optional[Dict]:
-        try:
-            if self.connection_type == 'serial':
-                return await self._read_serial()
-            elif self.connection_type == 'bluetooth':
-                return await self._read_bluetooth()
-            elif self.connection_type == 'wifi':
-                return await self._read_wifi()
-        except Exception as e:
-            self.logger.error(f"Read error: {e}")
-        return None
-
-    async def disconnect(self):
-        try:
-            if self.serial_conn:
-                self.serial_conn.close()
-            elif self.ble_client:
-                await self.ble_client.disconnect()
-            self.connection_type = None
-        except Exception as e:
-            self.logger.error(f"Disconnect error: {e}")
-
 # Weather Predictor
 class WeatherPredictor:
     def __init__(self):
@@ -416,14 +355,27 @@ class WeatherPredictor:
 # Weather System Manager
 class WeatherSystem:
     def __init__(self):
+        self.setup_config()
         self.setup_logging()
-        self.config = Config()
         self.device = DeviceManager()
-        self.scaler = StandardScaler()
+        self.predictor = WeatherPredictor()
         self.data_buffer = []
         self.running = False
-        self.predictor = WeatherPredictor()
-        
+
+    def setup_config(self):
+        load_dotenv()
+        self.config = {
+            'hardware': {
+                'arduino_port': os.getenv('ARDUINO_PORT', 'COM3'),
+                'baudrate': int(os.getenv('BAUDRATE', '115200')),
+                'update_interval': int(os.getenv('UPDATE_INTERVAL', '5'))
+            },
+            'connections': {
+                'wifi_host': os.getenv('WIFI_HOST', '192.168.4.1'),
+                'bt_device_name': os.getenv('BT_DEVICE_NAME', 'WeatherStation')
+            }
+        }
+
     def setup_logging(self):
         os.makedirs('logs', exist_ok=True)
         logging.basicConfig(
@@ -434,72 +386,9 @@ class WeatherSystem:
         self.logger = logging.getLogger(__name__)
 
     async def start(self):
-        self.running = True
-        try:
-            if not await self._establish_connection():
-                self.logger.error("Failed to connect to weather station")
-                return False
-
-            while self.running:
-                await self._process_cycle()
-                await asyncio.sleep(self.config.get('hardware', 'sensor_update_interval'))
-        except Exception as e:
-            self.logger.error(f"System error: {e}")
+        if not await self._establish_connection():
             return False
-        finally:
-            await self.stop()
-
-    async def _establish_connection(self) -> bool:
-        connection_methods = [
-            ('wifi', {'ip': self.config.get('connections', 'wifi_host')}),
-            ('bluetooth', {'device_name': self.config.get('connections', 'bt_device_name')}),
-            ('serial', {
-                'port': self.config.get('hardware', 'arduino_port'),
-                'baudrate': self.config.get('hardware', 'baudrate')
-            })
-        ]
-
-        for method, params in connection_methods:
-            if await self.device.connect(method, **params):
-                self.logger.info(f"Connected via {method}")
-                return True
-        return False
-
-    async def _process_cycle(self):
-        try:
-            data = await self.device.read_data()
-            if data:
-                self.data_buffer.append(data)
-                
-                # Keep 30 days of data for better predictions
-                if len(self.data_buffer) > 24 * 30:
-                    self.data_buffer.pop(0)
-                
-                # Generate prediction every 6 hours
-                if len(self.data_buffer) >= 24 * 7 and len(self.data_buffer) % 6 == 0:
-                    predictions = await self.predictor.predict_weather(self.data_buffer)
-                    self.logger.info(f"Updated weather predictions: {predictions}")
-                
-                self.logger.info(f"Current conditions: {data}")
-        except Exception as e:
-            self.logger.error(f"Processing error: {e}")
-
-    async def stop(self):
-        self.running = False
-        await self.device.disconnect()
-        self.logger.info("System stopped")
-
-# CLI Interface
-@click.group()
-def cli():
-    """Weather Monitoring System CLI"""
-    pass
-
-@cli.command()
-def start():
-    """Start the weather monitoring system"""
-    system = WeatherSystem()
-    asyncio.run(system.start())
-
-if __name__ == '__main__':
-    cli()
+        
+        while self.running:
+            await self._process_data()
+            await asyncio.sleep(self.config['hardware']['update_interval'])
