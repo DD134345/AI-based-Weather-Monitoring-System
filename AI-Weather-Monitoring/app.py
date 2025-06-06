@@ -5,6 +5,9 @@ from dotenv import load_dotenv
 from src.connections.device_manager import DeviceManager
 from src.core.weather_predictor import WeatherPredictor
 from src.utils.logger import setup_logging
+from service.service import WeatherService
+import logging
+import sys
 
 async def main():
     # Load environment variables
@@ -59,6 +62,15 @@ async def main():
     except Exception as e:
         logger.error(f"Error in main loop: {e}")
         await device.disconnect()
+    try:
+        service = WeatherService()
+        await service.start()
+    except KeyboardInterrupt:
+        logger.info("Shutting down...")
+        sys.exit(0)
+    except Exception as e:
+        logger.error(f"System failed: {e}")
+        sys.exit(1)
 
 if __name__ == '__main__':
     asyncio.run(main())

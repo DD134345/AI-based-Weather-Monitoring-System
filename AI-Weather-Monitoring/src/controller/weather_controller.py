@@ -68,3 +68,12 @@ class WeatherController:
                 json.dump(state, f)
         except Exception as e:
             self.logger.error(f"Error saving state: {e}")
+
+class WeatherDataProcessor:
+    def process_sensor_data(self, raw_data):
+        # Process the sensor data
+        return raw_data
+
+    def prepare_for_prediction(self):
+        # Prepare data for prediction
+        return None
