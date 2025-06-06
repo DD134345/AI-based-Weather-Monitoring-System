@@ -47,6 +47,9 @@ int bufferIndex = 0;
 TaskHandle_t sensorTaskHandle = NULL;
 TaskHandle_t bleTaskHandle = NULL;
 
+const unsigned long FAST_SAMPLING_INTERVAL = 5000; // 5 seconds
+const unsigned long SLOW_SAMPLING_INTERVAL = 3600000; // 1 hour
+
 void setup() {
     Serial.begin(115200);
     
@@ -100,34 +103,49 @@ void loop() {
 }
 
 void sensorTask(void *parameter) {
-    TickType_t xLastWakeTime = xTaskGetTickCount();
+    static unsigned long lastFastReading = 0;
+    static unsigned long lastSlowReading = 0;
     
     while(true) {
-        // Read sensors with error checking
-        float temp = dht.readTemperature();
-        float humidity = dht.readHumidity();
-        float pressure = bmp.readPressure() / 100.0F;
+        unsigned long currentTime = millis();
         
-        if (!isnan(temp) && !isnan(humidity) && pressure > 0) {
-            // Store data in buffer
-            dataBuffer[bufferIndex].temperature = temp;
-            dataBuffer[bufferIndex].humidity = humidity;
-            dataBuffer[bufferIndex].pressure = pressure;
-            dataBuffer[bufferIndex].timestamp = millis();
+        // Fast sampling for short-term predictions
+        if (currentTime - lastFastReading >= FAST_SAMPLING_INTERVAL) {
+            float temp = dht.readTemperature();
+            float humidity = dht.readHumidity();
+            float pressure = bmp.readPressure() / 100.0F;
             
-            bufferIndex = (bufferIndex + 1) % BUFFER_SIZE;
-            
-            // Save to SPIFFS periodically
-            if (bufferIndex == 0) {
-                saveDataToSPIFFS();
+            if (!isnan(temp) && !isnan(humidity) && pressure > 0) {
+                sendSensorData(temp, humidity, pressure);
+                lastFastReading = currentTime;
             }
-            
-            // Toggle LED to indicate successful reading
-            digitalWrite(LED_PIN, !digitalRead(LED_PIN));
         }
         
-        // Run task every 5 seconds
-        vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(5000));
+        // Hourly sampling for long-term predictions
+        if (currentTime - lastSlowReading >= SLOW_SAMPLING_INTERVAL) {
+            saveToBuffer();
+            lastSlowReading = currentTime;
+        }
+        
+        vTaskDelay(pdMS_TO_TICKS(1000)); // Check every second
+    }
+}
+
+void sendSensorData(float temp, float humidity, float pressure) {
+    StaticJsonDocument<200> doc;
+    doc["temperature"] = temp;
+    doc["humidity"] = humidity;
+    doc["pressure"] = pressure;
+    doc["timestamp"] = millis();
+    
+    String output;
+    serializeJson(doc, output);
+    Serial.println(output);
+    
+    // Also send via BLE if connected
+    if (deviceConnected) {
+        pCharacteristic->setValue(output.c_str());
+        pCharacteristic->notify();
     }
 }
 

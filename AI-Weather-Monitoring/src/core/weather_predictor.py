@@ -1,13 +1,19 @@
-import numpy as np
-from sklearn.ensemble import RandomForestRegressor
-from datetime import datetime
 import os
-from dotenv import load_dotenv
+import numpy as np
+import pandas as pd
+from sklearn.ensemble import StackingRegressor, GradientBoostingRegressor, RandomForestRegressor
+from sklearn.svm import SVR
+from sklearn.preprocessing import StandardScaler, RobustScaler
+from sklearn.model_selection import TimeSeriesSplit, cross_val_score
+import xgboost as xgb
+from datetime import datetime, timedelta
+import logging
+from typing import Dict, List, Optional, Tuple
 import joblib
-from typing import Dict, Optional, List
+from dotenv import load_dotenv
 from src.utils.logger import LoggerMixin
 
-class WeatherPredictor(LoggerMixin):
+class EnhancedWeatherPredictor(LoggerMixin):
     def __init__(self):
         super().__init__()
         load_dotenv()
@@ -17,7 +23,11 @@ class WeatherPredictor(LoggerMixin):
             max_depth=10,
             random_state=42
         )
-        self.data = []
+        self.data_buffer = []
+        self.min_samples = 24 * 7  # 7 days minimum
+        self.setup_logging()
+        self.setup_models()
+        self.setup_scalers()
 
     def _load_model(self) -> Optional[RandomForestRegressor]:
         try:
@@ -35,6 +45,55 @@ class WeatherPredictor(LoggerMixin):
         except Exception as e:
             self.log_error(f"Error saving model: {e}")
 
+    def setup_models(self):
+        # Create specialized models for each weather parameter
+        estimators = [
+            ('rf', RandomForestRegressor(
+                n_estimators=500,
+                max_depth=15,
+                min_samples_split=5,
+                n_jobs=-1,
+                random_state=42
+            )),
+            ('xgb', xgb.XGBRegressor(
+                n_estimators=300,
+                learning_rate=0.05,
+                max_depth=8,
+                subsample=0.8,
+                colsample_bytree=0.8,
+                random_state=42
+            )),
+            ('gbm', GradientBoostingRegressor(
+                n_estimators=300,
+                learning_rate=0.05,
+                max_depth=8,
+                subsample=0.8,
+                random_state=42
+            ))
+        ]
+
+        self.models = {
+            'temperature': StackingRegressor(
+                estimators=estimators,
+                final_estimator=SVR(kernel='rbf')
+            ),
+            'humidity': StackingRegressor(
+                estimators=estimators,
+                final_estimator=SVR(kernel='rbf')
+            ),
+            'pressure': StackingRegressor(
+                estimators=estimators,
+                final_estimator=SVR(kernel='rbf')
+            )
+        }
+
+    def setup_scalers(self):
+        self.scalers = {
+            'temperature': RobustScaler(),
+            'humidity': RobustScaler(),
+            'pressure': RobustScaler()
+        }
+
     def process_sensor_data(self, data: Dict) -> Optional[Dict]:
         """Process incoming sensor data and make prediction"""
         try:
@@ -48,7 +107,7 @@ class WeatherPredictor(LoggerMixin):
                 'timestamp': datetime.now().isoformat()
             }
             
-            self.data.append(processed_data)
+            self.data_buffer.append(processed_data)
             prediction = self.predict([
                 processed_data['temperature'],
                 processed_data['humidity'],
@@ -112,3 +171,101 @@ class WeatherPredictor(LoggerMixin):
             3: "Heavy Rain"
         }
         return weather_codes.get(code, "Unknown")
+
+    def prepare_features(self, data: List[Dict]) -> pd.DataFrame:
+        df = pd.DataFrame(data)
+        df['datetime'] = pd.to_datetime(df['timestamp'])
+        
+        # Advanced feature engineering
+        for param in ['temperature', 'humidity', 'pressure']:
+            # Time-based features
+            df[f'{param}_hour_avg'] = df.groupby(df['datetime'].dt.hour)[param].transform('mean')
+            df[f'{param}_day_avg'] = df.groupby(df['datetime'].dt.day)[param].transform('mean')
+            
+            # Rolling statistics
+            df[f'{param}_rolling_mean_6h'] = df[param].rolling(6).mean()
+            df[f'{param}_rolling_mean_24h'] = df[param].rolling(24).mean()
+            df[f'{param}_rolling_std_24h'] = df[param].rolling(24).std()
+            
+            # Rate of change
+            df[f'{param}_rate_1h'] = df[param].diff(1)
+            df[f'{param}_rate_6h'] = df[param].diff(6)
+            
+            # Scale features
+            df[param] = self.scalers[param].fit_transform(df[[param]])
+
+        # Weather pattern features
+        df['temp_humidity_ratio'] = df['temperature'] / df['humidity']
+        df['pressure_change_rate'] = df['pressure'].diff().rolling(6).mean()
+        
+        return df.dropna()
+
+    async def train_model(self, historical_data: List[Dict]) -> Dict[str, float]:
+        """Train models with advanced validation"""
+        try:
+            df = self.prepare_features(historical_data)
+            metrics = {}
+            
+            # Use time series cross-validation
+            tscv = TimeSeriesSplit(n_splits=5)
+            
+            for param in ['temperature', 'humidity', 'pressure']:
+                feature_cols = [col for col in df.columns if col.startswith(param) or 
+                              col in ['hour', 'day', 'temp_humidity_ratio', 'pressure_change_rate']]
+                
+                X = df[feature_cols].values
+                y = df[param].values
+                
+                # Cross validation with time series split
+                scores = cross_val_score(
+                    self.models[param],
+                    X, y,
+                    cv=tscv,
+                    scoring='neg_root_mean_squared_error'
+                )
+                
+                # Train final model
+                self.models[param].fit(X, y)
+                
+                # Store metrics
+                metrics[param] = {
+                    'rmse': float(-scores.mean()),
+                    'std': float(scores.std())
+                }
+            
+            return metrics
+            
+        except Exception as e:
+            logging.error(f"Training error: {e}")
+            return {}
+
+    async def predict_weather(self, recent_data: List[Dict], days_ahead: int = 7) -> List[Dict]:
+        """Generate detailed weather predictions"""
+        try:
+            df = self.prepare_features(recent_data)
+            predictions = []
+            
+            current_features = df.iloc[-1:]
+            current_date = pd.to_datetime(df.iloc[-1]['timestamp'])
+            
+            for day in range(days_ahead * 24):  # Predict every hour
+                next_date = current_date + timedelta(hours=day+1)
+                
+                prediction = {
+                    'timestamp': next_date.isoformat(),
+                    'temperature': self._predict_parameter('temperature', current_features),
+                    'humidity': self._predict_parameter('humidity', current_features),
+                    'pressure': self._predict_parameter('pressure', current_features),
+                }
+                
+                prediction['weather_type'] = self._determine_weather_type(prediction)
+                prediction['confidence'] = self._calculate_confidence(prediction)
+                
+                predictions.append(prediction)
+                current_features = self._update_features(current_features, prediction)
+            
+            return predictions
+            
+        except Exception as e:
+            logging.error(f"Prediction error: {e}")
+            return []
