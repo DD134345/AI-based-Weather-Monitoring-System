@@ -2,11 +2,11 @@ import time
 import asyncio
 from typing import Dict, Optional
 from src.service.sensor_handler import SensorHandler
-from src.core.data_processor import WeatherDataProcessor
+from src.core.core import WeatherDataProcessor
 from src.core.weather_predictor import WeatherPredictor
 import logging
 import json
-from src.utils.connection_manager import ConnectionManager
+from src.service import ConnectionManager
 
 class WeatherController:
     def __init__(self, connection_manager: ConnectionManager):

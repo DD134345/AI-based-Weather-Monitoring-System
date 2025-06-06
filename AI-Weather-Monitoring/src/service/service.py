@@ -5,7 +5,7 @@ from collections import deque
 from queue import Queue
 from concurrent.futures import ThreadPoolExecutor
 import websockets
-from .core import WeatherCore
+from src.core.core import WeatherCore
 
 class WeatherService:
     def __init__(self):

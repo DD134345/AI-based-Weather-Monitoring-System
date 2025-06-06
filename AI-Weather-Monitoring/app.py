@@ -2,10 +2,10 @@ import asyncio
 from datetime import datetime
 import os
 from dotenv import load_dotenv
-from src.connections.device_manager import DeviceManager
+from weather_system import DeviceManager
 from src.core.weather_predictor import WeatherPredictor
 from src.utils.logger import setup_logging
-from service.service import WeatherService
+from src.service.service import WeatherService
 import logging
 import sys
 
