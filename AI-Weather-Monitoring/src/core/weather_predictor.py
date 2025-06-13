@@ -25,7 +25,6 @@ class EnhancedWeatherPredictor(LoggerMixin):
         )
         self.data_buffer = []
         self.min_samples = 24 * 7  # 7 days minimum
-        self.setup_logging()
         self.setup_models()
         self.setup_scalers()
 
@@ -101,9 +100,9 @@ class EnhancedWeatherPredictor(LoggerMixin):
                 return None
 
             processed_data = {
-                'temperature': float(data.get('temperature')),
-                'humidity': float(data.get('humidity')),
-                'pressure': float(data.get('pressure')),
+                'temperature': float(data.get('temperature', 0.0)),
+                'humidity': float(data.get('humidity', 0.0)),
+                'pressure': float(data.get('pressure', 0.0)),
                 'timestamp': datetime.now().isoformat()
             }
             
@@ -239,6 +238,61 @@ class EnhancedWeatherPredictor(LoggerMixin):
             logging.error(f"Training error: {e}")
             return {}
 
+    def _predict_parameter(self, param: str, features) -> float:
+        """Make prediction for a specific weather parameter"""
+        try:
+            feature_cols = [col for col in features.columns if col.startswith(param) or 
+                          col in ['hour', 'day', 'temp_humidity_ratio', 'pressure_change_rate']]
+            return float(self.models[param].predict(features[feature_cols]))
+        except Exception as e:
+            self.log_error(f"Error predicting {param}: {e}")
+            return 0.0
+
+    def _calculate_confidence(self, prediction: Dict) -> float:
+        """Calculate confidence score for the prediction with enhanced metrics"""
+        try:
+            # Base confidence from parameter ranges
+            temp_conf = min(1.0, max(0.0, 1 - abs(prediction['temperature']) / 50))
+            humid_conf = min(1.0, max(0.0, 1 - abs(prediction['humidity'] - 50) / 50))
+            press_conf = min(1.0, max(0.0, 1 - abs(prediction['pressure'] - 1013) / 100))
+            
+            # Add trend stability factor
+            trend_stability = 1.0
+            if len(self.data_buffer) > 24:
+                recent_data = pd.DataFrame(self.data_buffer[-24:])
+                for param in ['temperature', 'humidity', 'pressure']:
+                    std = recent_data[param].std()
+                    # Higher stability (lower std) increases confidence
+                    trend_stability *= max(0.0, 1.0 - (std / 10))
+            
+            # Combine all factors
+            base_confidence = (temp_conf + humid_conf + press_conf) / 3
+            final_confidence = (base_confidence + trend_stability) / 2
+            
+            return round(final_confidence, 2)
+            
+        except Exception as e:
+            self.log_error(f"Error calculating confidence: {e}")
+            return 0.5
+
+    def _determine_weather_type(self, prediction: Dict) -> str:
+        """Determine weather type based on predicted parameters"""
+        try:
+            temp = prediction['temperature']
+            humidity = prediction['humidity']
+            pressure = prediction['pressure']
+
+            if pressure < 1000:
+                if humidity > 80:
+                    return "Heavy Rain"
+                return "Rain Likely"
+            elif humidity > 70:
+                return "Partly Cloudy"
+            return "Clear"
+        except Exception as e:
+            self.log_error(f"Error determining weather type: {e}")
+            return "Unknown"
+
     async def predict_weather(self, recent_data: List[Dict], days_ahead: int = 7) -> List[Dict]:
         """Generate detailed weather predictions"""
         try:
@@ -264,8 +318,49 @@ class EnhancedWeatherPredictor(LoggerMixin):
                 predictions.append(prediction)
                 current_features = self._update_features(current_features, prediction)
             
-            return predictions
-            
+                return predictions
+                
         except Exception as e:
-            logging.error(f"Prediction error: {e}")
-            return []
+         logging.error(f"Prediction error: {e}")
+        return []
+    
+    def _update_features(self, current_features: pd.DataFrame, prediction: Dict) -> pd.DataFrame:
+        """Update features for the next prediction iteration"""
+        try:
+            new_features = current_features.copy()
+            
+            # Update base parameters
+            for param in ['temperature', 'humidity', 'pressure']:
+                new_features[param] = prediction[param]
+                
+                # Update time-based features
+                new_features[f'{param}_hour_avg'] = new_features[param]  # Single point, use current
+                new_features[f'{param}_day_avg'] = (
+                    new_features[f'{param}_day_avg'] * 23 + new_features[param]
+                ) / 24  # Rolling daily average
+                
+                # Update rolling statistics
+                new_features[f'{param}_rolling_mean_6h'] = (
+                    new_features[f'{param}_rolling_mean_6h'] * 5 + new_features[param]
+                ) / 6
+                new_features[f'{param}_rolling_mean_24h'] = (
+                    new_features[f'{param}_rolling_mean_24h'] * 23 + new_features[param]
+                ) / 24
+                
+                # Calculate rate of change
+                new_features[f'{param}_rate_1h'] = (
+                    new_features[param] - current_features[param].iloc[0]
+                )
+            
+            # Update datetime and derived features
+            new_features['datetime'] = pd.to_datetime(prediction['timestamp'])
+            new_features['temp_humidity_ratio'] = new_features['temperature'] / new_features['humidity']
+            new_features['pressure_change_rate'] = (
+                new_features['pressure'] - current_features['pressure'].iloc[0]
+            )
+            
+            return new_features
+                
+        except Exception as e:
+            self.log_error(f"Error updating features: {e}")
+            return current_features

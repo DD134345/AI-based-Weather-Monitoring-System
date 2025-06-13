@@ -2,11 +2,23 @@ class WeatherViewModel : ViewModel() {
     private val _connectionStatus = MutableLiveData<String>()
     val connectionStatus: LiveData<String> = _connectionStatus
 
-    private val _weatherData = MutableLiveData<WeatherData>()
-    val weatherData: LiveData<WeatherData> = _weatherData
+    private val _weatherData = MutableLiveData<WeatherState>()
+    val weatherData: LiveData<WeatherState> = _weatherData
 
     private val connectionManager = ConnectionManager()
     private var currentConnection: DeviceConnection? = null
+
+    data class WeatherState(
+        val currentWeather: WeatherData,
+        val prediction: PredictionData,
+        val historicalData: List<WeatherData>
+    )
+
+    data class PredictionData(
+        val weatherType: String,
+        val confidence: Float,
+        val futureReadings: List<WeatherData>
+    )
 
     fun connectBluetooth(device: BluetoothDevice) = viewModelScope.launch {
         currentConnection?.disconnect()
@@ -53,6 +65,29 @@ class WeatherViewModel : ViewModel() {
         currentConnection?.readData()?.let { data ->
             _weatherData.value = data
         }
+    }
+
+    fun updateWeatherDisplay() = viewModelScope.launch {
+        try {
+            val current = currentConnection?.readData()
+            current?.let { data ->
+                val historical = getHistoricalData()
+                val prediction = getPrediction(data)
+
+                _weatherData.value = WeatherState(
+                    currentWeather = data,
+                    prediction = prediction,
+                    historicalData = historical
+                )
+            }
+        } catch (e: Exception) {
+            _connectionStatus.value = "Error: ${e.message}"
+        }
+    }
+
+    private suspend fun getPrediction(currentData: WeatherData): PredictionData {
+        // Implement prediction fetching logic
+        return weatherRepository.getPrediction(currentData)
     }
 
     override fun onCleared() {
