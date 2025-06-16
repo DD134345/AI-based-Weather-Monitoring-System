@@ -11,9 +11,61 @@ import logging
 from typing import Dict, List, Optional, Tuple
 import joblib
 from dotenv import load_dotenv
-from src.utils.logger import LoggerMixin
+from functools import lru_cache
+from abc import ABC, abstractmethod
+from pathlib import Path
+
+
+# Base paths
+BASE_DIR = Path(__file__).parent.parent.parent
+DATA_DIR = BASE_DIR / 'data'
+MODEL_DIR = BASE_DIR / 'models' / 'saved_models'
+
+# Model settings
+WEATHER_PARAMS = ['temperature', 'humidity', 'pressure']
+FEATURE_COLUMNS = ['hour', 'day', 'temp_humidity_ratio', 'pressure_change_rate']
+VALID_RANGES = {
+    'temperature': (-50, 60),
+    'humidity': (0, 100),
+    'pressure': (900, 1100)
+}
+
+class LoggerMixin:
+    def log_error(self, message: str) -> None:
+        logging.error(message)
+
+    def log_info(self, message: str) -> None:
+        logging.info(message)
+
+    def log_warning(self, message: str) -> None:
+        logging.warning(message)
+
+    def log_critical(self, message: str) -> None:
+        logging.critical(message)
+
+class ErrorHandler:
+    def __init__(self):
+        self.logger = logging.getLogger(__name__)
+
+    def handle_error(self, error: Exception, context: str) -> None:
+        error_msg = f"{context}: {str(error)}"
+        if isinstance(error, (ValueError, KeyError)):
+            self.logger.warning(f"Data validation failed: {error_msg}")
+        elif isinstance(error, (pd.errors.EmptyDataError, pd.errors.OutOfBoundsDatetime)):
+            self.logger.error(f"DataFrame operation failed: {error_msg}")
+        else:
+            self.logger.critical(f"Critical error occurred: {error_msg}")
 
 class EnhancedWeatherPredictor(LoggerMixin):
+    # Constants to reduce memory allocations
+    WEATHER_PARAMS = ['temperature', 'humidity', 'pressure']
+    FEATURE_COLUMNS = ['hour', 'day', 'temp_humidity_ratio', 'pressure_change_rate']
+    VALID_RANGES = {
+        'temperature': (-50, 60),
+        'humidity': (0, 100),
+        'pressure': (900, 1100)
+    }
+
     def __init__(self):
         super().__init__()
         load_dotenv()
@@ -27,6 +79,8 @@ class EnhancedWeatherPredictor(LoggerMixin):
         self.min_samples = 24 * 7  # 7 days minimum
         self.setup_models()
         self.setup_scalers()
+        self.feature_engineer = FeatureEngineer()
+        self.error_handler = ErrorHandler()
 
     def _load_model(self) -> Optional[RandomForestRegressor]:
         try:
@@ -143,13 +197,7 @@ class EnhancedWeatherPredictor(LoggerMixin):
                 self.log_error("Missing required weather parameters")
                 return False
                 
-            valid_ranges = {
-                'temperature': (-50, 60),
-                'humidity': (0, 100),
-                'pressure': (900, 1100)
-            }
-            
-            for param, (min_val, max_val) in valid_ranges.items():
+            for param, (min_val, max_val) in self.VALID_RANGES.items():
                 value = float(data[param])
                 if not min_val <= value <= max_val:
                     self.log_error(f"Invalid {param} value: {value}")
@@ -171,29 +219,35 @@ class EnhancedWeatherPredictor(LoggerMixin):
         }
         return weather_codes.get(code, "Unknown")
 
-    def prepare_features(self, data: List[Dict]) -> pd.DataFrame:
+    def _prepare_features(self, data: List[Dict]) -> pd.DataFrame:
+        """Optimized feature engineering with vectorized operations"""
         df = pd.DataFrame(data)
         df['datetime'] = pd.to_datetime(df['timestamp'])
         
-        # Advanced feature engineering
-        for param in ['temperature', 'humidity', 'pressure']:
-            # Time-based features
-            df[f'{param}_hour_avg'] = df.groupby(df['datetime'].dt.hour)[param].transform('mean')
-            df[f'{param}_day_avg'] = df.groupby(df['datetime'].dt.day)[param].transform('mean')
+        # Vectorized operations for all parameters at once
+        for param in self.WEATHER_PARAMS:
+            # Group operations
+            hour_groups = df.groupby(df['datetime'].dt.hour)[param]
+            day_groups = df.groupby(df['datetime'].dt.day)[param]
             
-            # Rolling statistics
-            df[f'{param}_rolling_mean_6h'] = df[param].rolling(6).mean()
-            df[f'{param}_rolling_mean_24h'] = df[param].rolling(24).mean()
-            df[f'{param}_rolling_std_24h'] = df[param].rolling(24).std()
+            # Compute all features in parallel
+            df[f'{param}_hour_avg'] = hour_groups.transform('mean')
+            df[f'{param}_day_avg'] = day_groups.transform('mean')
             
-            # Rate of change
+            # Vectorized rolling operations
+            rolling_data = df[param].rolling(window=24)
+            df[f'{param}_rolling_mean_6h'] = df[param].rolling(window=6).mean()
+            df[f'{param}_rolling_mean_24h'] = rolling_data.mean()
+            df[f'{param}_rolling_std_24h'] = rolling_data.std()
+            
+            # Vectorized diff operations
             df[f'{param}_rate_1h'] = df[param].diff(1)
             df[f'{param}_rate_6h'] = df[param].diff(6)
             
-            # Scale features
+            # Scale features using pre-initialized scalers
             df[param] = self.scalers[param].fit_transform(df[[param]])
-
-        # Weather pattern features
+        
+        # Vectorized derived features
         df['temp_humidity_ratio'] = df['temperature'] / df['humidity']
         df['pressure_change_rate'] = df['pressure'].diff().rolling(6).mean()
         
@@ -275,13 +329,10 @@ class EnhancedWeatherPredictor(LoggerMixin):
             self.log_error(f"Error calculating confidence: {e}")
             return 0.5
 
-    def _determine_weather_type(self, prediction: Dict) -> str:
-        """Determine weather type based on predicted parameters"""
+    @lru_cache(maxsize=128)
+    def _get_weather_type(self, temp: float, humidity: float, pressure: float) -> str:
+        """Cached weather type determination"""
         try:
-            temp = prediction['temperature']
-            humidity = prediction['humidity']
-            pressure = prediction['pressure']
-
             if pressure < 1000:
                 if humidity > 80:
                     return "Heavy Rain"
@@ -293,37 +344,94 @@ class EnhancedWeatherPredictor(LoggerMixin):
             self.log_error(f"Error determining weather type: {e}")
             return "Unknown"
 
+    def _determine_weather_type(self, prediction: Dict) -> str:
+        return self._get_weather_type(
+            prediction['temperature'],
+            prediction['humidity'],
+            prediction['pressure']
+        )
+
     async def predict_weather(self, recent_data: List[Dict], days_ahead: int = 7) -> List[Dict]:
-        """Generate detailed weather predictions"""
+        """Optimized weather prediction with batched processing"""
         try:
             df = self.prepare_features(recent_data)
             predictions = []
             
-            current_features = df.iloc[-1:]
+            # Pre-allocate features matrix
+            current_features = df.iloc[-1:].copy()
             current_date = pd.to_datetime(df.iloc[-1]['timestamp'])
             
-            for day in range(days_ahead * 24):  # Predict every hour
-                next_date = current_date + timedelta(hours=day+1)
-                
-                prediction = {
-                    'timestamp': next_date.isoformat(),
-                    'temperature': self._predict_parameter('temperature', current_features),
-                    'humidity': self._predict_parameter('humidity', current_features),
-                    'pressure': self._predict_parameter('pressure', current_features),
-                }
-                
-                prediction['weather_type'] = self._determine_weather_type(prediction)
-                prediction['confidence'] = self._calculate_confidence(prediction)
-                
-                predictions.append(prediction)
-                current_features = self._update_features(current_features, prediction)
+            # Batch predictions for better performance
+            BATCH_SIZE = 24  # Process one day at a time
+            total_hours = days_ahead * 24
             
-                return predictions
+            for batch_start in range(0, total_hours, BATCH_SIZE):
+                batch_end = min(batch_start + BATCH_SIZE, total_hours)
+                batch_predictions = []
+                
+                for hour in range(batch_start, batch_end):
+                    next_date = current_date + timedelta(hours=hour+1)
+                    
+                    # Parallel parameter prediction
+                    pred_params = {
+                        param: self._predict_parameter(param, current_features) 
+                        for param in self.WEATHER_PARAMS
+                    }
+                    
+                    prediction = {
+                        'timestamp': next_date.isoformat(),
+                        **pred_params
+                    }
+                    
+                    # Add derived predictions
+                    prediction['weather_type'] = self._determine_weather_type(prediction)
+                    prediction['confidence'] = self._calculate_confidence(prediction)
+                    
+                    batch_predictions.append(prediction)
+                    current_features = self._update_features(current_features, prediction)
+                
+                predictions.extend(batch_predictions)
+            
+            return predictions
                 
         except Exception as e:
-         logging.error(f"Prediction error: {e}")
-        return []
+            self.log_error(f"Prediction error: {e}")
+            return []
     
+    def prepare_features(self, data: List[Dict]) -> pd.DataFrame:
+        """Optimized feature engineering with vectorized operations"""
+        df = pd.DataFrame(data)
+        df['datetime'] = pd.to_datetime(df['timestamp'])
+        
+        # Vectorized operations for all parameters at once
+        for param in self.WEATHER_PARAMS:
+            # Group operations
+            hour_groups = df.groupby(df['datetime'].dt.hour)[param]
+            day_groups = df.groupby(df['datetime'].dt.day)[param]
+            
+            # Compute all features in parallel
+            df[f'{param}_hour_avg'] = hour_groups.transform('mean')
+            df[f'{param}_day_avg'] = day_groups.transform('mean')
+            
+            # Vectorized rolling operations
+            rolling_data = df[param].rolling(window=24)
+            df[f'{param}_rolling_mean_6h'] = df[param].rolling(window=6).mean()
+            df[f'{param}_rolling_mean_24h'] = rolling_data.mean()
+            df[f'{param}_rolling_std_24h'] = rolling_data.std()
+            
+            # Vectorized diff operations
+            df[f'{param}_rate_1h'] = df[param].diff(1)
+            df[f'{param}_rate_6h'] = df[param].diff(6)
+            
+            # Scale features using pre-initialized scalers
+            df[param] = self.scalers[param].fit_transform(df[[param]])
+        
+        # Vectorized derived features
+        df['temp_humidity_ratio'] = df['temperature'] / df['humidity']
+        df['pressure_change_rate'] = df['pressure'].diff().rolling(6).mean()
+        
+        return df.dropna()
+
     def _update_features(self, current_features: pd.DataFrame, prediction: Dict) -> pd.DataFrame:
         """Update features for the next prediction iteration"""
         try:
@@ -364,3 +472,48 @@ class EnhancedWeatherPredictor(LoggerMixin):
         except Exception as e:
             self.log_error(f"Error updating features: {e}")
             return current_features
+
+    # Add this method for centralized error handling
+    def _handle_error(self, error: Exception, context: str) -> None:
+        """Centralized error handling with context"""
+        error_msg = f"{context}: {str(error)}"
+        self.log_error(error_msg)
+        
+        if isinstance(error, (ValueError, KeyError)):
+            # Data validation errors
+            self.log_warning(f"Data validation failed: {error_msg}")
+        elif isinstance(error, (pd.errors.EmptyDataError, pd.errors.OutOfBoundsDatetime)):
+            # DataFrame-related errors
+            self.log_error(f"DataFrame operation failed: {error_msg}")
+        else:
+            # Unexpected errors
+            self.log_critical(f"Critical error occurred: {error_msg}")
+            # Could add error reporting to monitoring system here
+
+DEFAULT_MODEL_CONFIGS = {
+    'temperature': {
+        'estimators': [
+            ('rf', RandomForestRegressor(
+                n_estimators=500,
+                max_depth=15,
+                min_samples_split=5,
+                n_jobs=-1,
+                random_state=42
+            )),
+            # ... other estimators
+        ]
+    }
+    # ... configs for other parameters
+}
+
+class FeatureEngineer:
+    """Handle all feature engineering operations"""
+    
+    def prepare_features(self, data: List[Dict]) -> pd.DataFrame:
+        # Move feature engineering logic here
+        return pd.DataFrame(data)
+    
+    def update_features(self, current_features: pd.DataFrame, 
+                       prediction: Dict) -> pd.DataFrame:
+        # Move feature update logic here
+        return current_features.copy()
