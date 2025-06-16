@@ -218,13 +218,13 @@ class EnhancedWeatherPredictor(LoggerMixin):
                 # Cross validation with time series split
                 scores = cross_val_score(
                     self.models[param],
-                    X, y,
+                    np.array(X), np.array(y),
                     cv=tscv,
                     scoring='neg_root_mean_squared_error'
                 )
                 
                 # Train final model
-                self.models[param].fit(X, y)
+                self.models[param].fit(X, np.asarray(y))
                 
                 # Store metrics
                 metrics[param] = {
