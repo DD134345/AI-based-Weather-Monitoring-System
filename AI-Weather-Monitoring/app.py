@@ -1,19 +1,19 @@
 import asyncio
+import logging
 import os
+import signal
+import sys
+import winreg
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 from dotenv import load_dotenv
-from weather_system import DeviceManager
+from src.service.device_manager import DeviceManager  # Updated import
 from src.utils.logger import setup_logging
-from src.service.service import WeatherService as ServiceImplementation
-import logging
-import sys
-import signal
-import winreg
-import numpy as np
+from src.service.service import WeatherService
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.preprocessing import StandardScaler
+import numpy as np
 
 class WeatherPredictor:
     def __init__(self):
@@ -67,7 +67,7 @@ class WeatherApp:
         self.setup_environment()
         self.running = True
         self.device = None
-        self.service: Optional[ServiceImplementation] = None
+        self.service: Optional[WeatherService] = None
         self.reconnect_attempts = 3
         self.reconnect_delay = 5  # seconds
         self.predictor = WeatherPredictor()
@@ -141,7 +141,7 @@ class WeatherApp:
             if not await self.connect_device():
                 return False
 
-            self.service = ServiceImplementation()
+            self.service = WeatherService()
             await self.service.start()
 
             while self.running:

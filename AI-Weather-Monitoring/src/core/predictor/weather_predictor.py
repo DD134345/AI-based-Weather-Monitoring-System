@@ -517,3 +517,4 @@ class FeatureEngineer:
                        prediction: Dict) -> pd.DataFrame:
         # Move feature update logic here
         return current_features.copy()
+

@@ -8,6 +8,33 @@ class ConnectionManager:
         self.current_connection = None
         self.logger = logging.getLogger(__name__)
 
+    async def _connect_bluetooth(self, device_name: str) -> bool:
+        # Implement your Bluetooth connection logic here
+        try:
+            # Add your Bluetooth connection code
+            return True
+        except Exception as e:
+            self.logger.error(f"Bluetooth connection error: {e}")
+            return False
+
+    async def _connect_wifi(self, host: str) -> bool:
+        # Implement your WiFi connection logic here
+        try:
+            # Add your WiFi connection code
+            return True
+        except Exception as e:
+            self.logger.error(f"WiFi connection error: {e}")
+            return False
+
+    async def _connect_serial(self, port: str, baudrate: int) -> bool:
+        # Implement your Serial connection logic here
+        try:
+            # Add your Serial connection code
+            return True
+        except Exception as e:
+            self.logger.error(f"Serial connection error: {e}")
+            return False
+
     async def connect(self, connection_type: str, **params) -> bool:
         try:
             if connection_type == 'bluetooth':
@@ -15,7 +42,7 @@ class ConnectionManager:
             elif connection_type == 'wifi':
                 return await self._connect_wifi(params['host'])
             elif connection_type == 'serial':
-                return self._connect_serial(params['port'], params['baudrate'])
+                return await self._connect_serial(params['port'], params['baudrate'])
             return False
         except Exception as e:
             self.logger.error(f"Connection error: {e}")

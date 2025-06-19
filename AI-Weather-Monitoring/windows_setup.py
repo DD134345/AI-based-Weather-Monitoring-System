@@ -7,7 +7,7 @@ def setup_windows():
     print("Setting up Weather Monitoring System for Windows...")
     
     # Install requirements
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", "requirements_windows.txt"])
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"])
     
     # Create necessary directories
     dirs = ['logs', 'data', 'models', 'config']
