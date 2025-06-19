@@ -15,7 +15,7 @@ class WeatherService:
         self.connected_clients = set()
         self.executor = ThreadPoolExecutor(max_workers=4)
 
-    async def start(self, serial_port: str = None):
+    async def start(self, serial_port: Optional[str] = None):
         """Start all services"""
         try:
             port = serial_port or self.core.config['hardware']['arduino_port']
@@ -44,6 +44,13 @@ class WeatherService:
         # WebSocket server implementation
         pass
 
+    async def broadcast(self, message):
+        """Broadcast message to all connected clients"""
+        if self.connected_clients:
+            await asyncio.gather(
+                *[client.send(message) for client in self.connected_clients]
+            )
+
     async def process_data_loop(self):
         """Process incoming data"""
         while True:
@@ -55,3 +62,11 @@ class WeatherService:
             except Exception as e:
                 self.core.logger.error(f"Error processing data: {e}")
             await asyncio.sleep(0.1)
+
+    async def stop(self):
+        # Stop service
+        pass
+
+    async def broadcast_data(self, data):
+        # Broadcast weather data
+        pass
