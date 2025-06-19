@@ -71,24 +71,26 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
         
-        setupUI()
-        observeData()
+        setupObservers()
+        setupRefresh()
+        viewModel.connect()
     }
 
-    private fun setupUI() {
-        binding.apply {
-            connectButton.setOnClickListener { 
-                viewModel.connect(selectedConnectionType) 
-            }
-            refreshButton.setOnClickListener { 
-                viewModel.refreshData() 
+    private fun setupObservers() {
+        viewModel.weatherData.observe(this) { data ->
+            binding.apply {
+                temperatureValue.text = "%.1f°C".format(data.temperature)
+                humidityValue.text = "%.1f%%".format(data.humidity)
+                pressureValue.text = "%.1f hPa".format(data.pressure)
+                lastUpdate.text = "Last update: ${data.timestamp}"
             }
         }
     }
 
-    private fun observeData() {
-        viewModel.weatherData.observe(this) { data ->
-            updateDisplay(data)
+    private fun setupRefresh() {
+        binding.swipeRefresh.setOnRefreshListener {
+            viewModel.refreshData()
+            binding.swipeRefresh.isRefreshing = false
         }
     }
 }
