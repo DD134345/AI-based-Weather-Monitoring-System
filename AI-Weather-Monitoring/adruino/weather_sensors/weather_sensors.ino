@@ -150,6 +150,7 @@ void setupWebServer() {
     // Serve historical data
     server.on("/history", HTTP_GET, [](AsyncWebServerRequest *request) {
         String jsonArray = "[";
+        String jsonString; // Declare jsonString here
         for(int i = 0; i < BUFFER_SIZE; i++) {
             if (dataBuffer[i].timestamp > 0) {
                 StaticJsonDocument<200> doc;
@@ -158,7 +159,7 @@ void setupWebServer() {
                 doc["pressure"] = dataBuffer[i].pressure;
                 doc["timestamp"] = dataBuffer[i].timestamp;
                 
-                String jsonString;
+                
                 serializeJson(doc, jsonString);
                 
                 if (i > 0) jsonArray += ",";
@@ -167,7 +168,7 @@ void setupWebServer() {
         }
         jsonArray += "]";
         
-        request->send(200, "application/json", jsonString);
+        request->send(200, "application/json", jsonArray);
     });
     
     server.begin();
