@@ -70,7 +70,11 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
-        
+
+        // Set up Toolbar
+        setSupportActionBar(binding.toolbar)
+        supportActionBar?.title = "Weather Monitor"
+
         setupObservers()
         setupRefresh()
         setupConnectButton()

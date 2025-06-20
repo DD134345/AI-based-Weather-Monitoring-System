@@ -1,3 +1,18 @@
+package com.weathermonitoring
+
+import androidx.lifecycle.LiveData
+import androidx.lifecycle.MutableLiveData
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.google.gson.Gson
+import kotlinx.coroutines.launch
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.Response
+import okhttp3.WebSocket
+import okhttp3.WebSocketListener
+import java.util.concurrent.TimeUnit
+
 class WeatherViewModel : ViewModel() {
     private val _weatherData = MutableLiveData<WeatherData>()
     val weatherData: LiveData<WeatherData> = _weatherData
@@ -56,7 +71,22 @@ class WeatherViewModel : ViewModel() {
     }
 
     fun refreshData() {
-        webSocket?.send("refresh")
+        viewModelScope.launch {
+            // Simulate fetching data
+            val temperature = (20..30).random().toFloat()
+            val humidity = (50..70).random().toFloat()
+            val pressure = (1000..1020).random().toFloat()
+
+            _weatherData.value = WeatherData(temperature, humidity, pressure)
+
+            // Simulate prediction
+            val predictionText = when {
+                temperature > 25 && humidity > 60 -> "Hot and humid"
+                temperature < 20 && humidity < 50 -> "Cool and dry"
+                else -> "Moderate"
+            }
+            _prediction.value = predictionText
+        }
     }
 
     override fun onCleared() {
