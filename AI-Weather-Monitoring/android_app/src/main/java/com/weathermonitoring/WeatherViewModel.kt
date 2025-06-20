@@ -63,6 +63,32 @@ class WeatherViewModel : ViewModel() {
         webSocket?.close(1000, "View Model cleared")
         super.onCleared()
     }
+
+    fun connectBluetooth() {
+        viewModelScope.launch {
+            _connectionState.value = ConnectionState.Connecting
+            try {
+                // Initialize Bluetooth connection
+                // This is a placeholder - implement actual Bluetooth logic
+                _connectionState.value = ConnectionState.Connected
+            } catch (e: Exception) {
+                _connectionState.value = ConnectionState.Error(e.message ?: "Bluetooth connection failed")
+            }
+        }
+    }
+
+    fun connectSerial() {
+        viewModelScope.launch {
+            _connectionState.value = ConnectionState.Connecting
+            try {
+                // Initialize Serial connection
+                // This is a placeholder - implement actual Serial logic
+                _connectionState.value = ConnectionState.Connected
+            } catch (e: Exception) {
+                _connectionState.value = ConnectionState.Error(e.message ?: "Serial connection failed")
+            }
+        }
+    }
 }
 
 sealed class ConnectionState {

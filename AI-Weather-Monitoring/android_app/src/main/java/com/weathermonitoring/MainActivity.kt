@@ -71,53 +71,32 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
         
-        setupToolbar()
         setupObservers()
         setupRefresh()
         setupConnectButton()
     }
 
-    private fun setupToolbar() {
-        setSupportActionBar(binding.toolbar)
-        supportActionBar?.setTitle(R.string.app_name)
-    }
-
     private fun setupObservers() {
         viewModel.weatherData.observe(this) { data ->
-            updateWeatherDisplay(data)
-        }
-
-        viewModel.connectionState.observe(this) { state ->
-            updateConnectionState(state)
+            binding.apply {
+                temperatureValue.text = getString(R.string.temperature_format, data.temperature)
+                humidityValue.text = getString(R.string.humidity_format, data.humidity)
+                pressureValue.text = getString(R.string.pressure_format, data.pressure)
+            }
         }
 
         viewModel.prediction.observe(this) { prediction ->
             binding.predictionValue.text = prediction
         }
-    }
 
-    private fun updateWeatherDisplay(data: WeatherData) {
-        binding.apply {
-            temperatureValue.text = getString(R.string.temperature_format, data.temperature)
-            humidityValue.text = getString(R.string.humidity_format, data.humidity)
-            pressureValue.text = getString(R.string.pressure_format, data.pressure)
+        viewModel.connectionState.observe(this) { state ->
+            updateConnectionState(state)
         }
     }
 
-    private fun updateConnectionState(state: ConnectionState) {
-        when (state) {
-            is ConnectionState.Connected -> {
-                binding.connectFab.setImageResource(R.drawable.ic_connected)
-                showSnackbar("Connected")
-            }
-            is ConnectionState.Disconnected -> {
-                binding.connectFab.setImageResource(R.drawable.ic_connect)
-                showSnackbar("Disconnected")
-            }
-            is ConnectionState.Error -> {
-                binding.connectFab.setImageResource(R.drawable.ic_error)
-                showSnackbar("Connection error: ${state.message}")
-            }
+    private fun setupConnectButton() {
+        binding.connectFab.setOnClickListener {
+            showConnectionDialog()
         }
     }
 
@@ -128,16 +107,11 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun setupConnectButton() {
-        binding.connectFab.setOnClickListener {
-            showConnectionDialog()
-        }
-    }
-
     private fun showConnectionDialog() {
+        val items = arrayOf("Bluetooth", "WiFi", "USB")
         MaterialAlertDialogBuilder(this)
             .setTitle("Connect to Device")
-            .setItems(R.array.connection_methods) { _, which ->
+            .setItems(items) { _, which ->
                 when (which) {
                     0 -> viewModel.connectBluetooth()
                     1 -> showWifiDialog()
@@ -163,7 +137,14 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    private fun showSnackbar(message: String) {
+    private fun updateConnectionState(state: ConnectionState) {
+        val (icon, message) = when (state) {
+            is ConnectionState.Connected -> Pair(R.drawable.ic_connected, "Connected")
+            is ConnectionState.Disconnected -> Pair(R.drawable.ic_connect, "Disconnected")
+            is ConnectionState.Connecting -> Pair(R.drawable.ic_connecting, "Connecting...")
+            is ConnectionState.Error -> Pair(R.drawable.ic_error, "Error: ${state.message}")
+        }
+        binding.connectFab.setImageResource(icon)
         Snackbar.make(binding.root, message, Snackbar.LENGTH_SHORT).show()
     }
 }

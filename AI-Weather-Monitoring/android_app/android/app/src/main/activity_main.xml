@@ -1,8 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="app_name">Weather Monitor</string>
     <string name="temperature_format">%.1f°C</string>
-    <string name="humidity_format">%.1f%%</string>
-    <string name="pressure_format">%.1f hPa</string>
+    <string name="humidity_format">Humidity: %.1f%%</string>
+    <string name="pressure_format">Pressure: %.1f hPa</string>
+    <string name="connection_error">Connection Error: %s</string>
 </resources>
 
 <androidx.coordinatorlayout.widget.CoordinatorLayout
