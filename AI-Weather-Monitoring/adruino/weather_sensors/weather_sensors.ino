@@ -123,6 +123,24 @@ void sensorTask(void *parameter) {
     }
 }
 
+void setupBLE() {
+  BLEDevice::init("Weather Station");
+  pServer = BLEDevice::createServer();
+  BLEService *pService = pServer->createService(SERVICE_UUID);
+  pCharacteristic = pService->createCharacteristic(
+                      CHAR_UUID,
+                      BLECharacteristic::PROPERTY_READ   |
+                      BLECharacteristic::PROPERTY_WRITE  |
+                      BLECharacteristic::PROPERTY_NOTIFY
+                    );
+  pCharacteristic->addDescriptor(new BLE2902());
+  pService->start();
+  BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
+  pAdvertising->addServiceUUID(SERVICE_UUID);
+  pAdvertising->setScanResponse(true);
+  BLEDevice::startAdvertising();
+}
+
 void sendSensorData(float temp, float humidity, float pressure) {
     StaticJsonDocument<200> doc;
     doc["temperature"] = temp;
