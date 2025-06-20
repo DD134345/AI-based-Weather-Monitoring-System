@@ -242,17 +242,3 @@ void saveToBuffer() {
     dataBuffer[bufferIndex] = newData;
     bufferIndex = (bufferIndex + 1) % BUFFER_SIZE;
 }
-
-bool getMD5(uint8_t* data, uint16_t len, char* output){
-  unsigned char _buf[16];
-  mbedtls_md5_context _ctx;
-  mbedtls_md5_init(&_ctx);
-  mbedtls_md5_starts(&_ctx);
-  mbedtls_md5_update(&_ctx, data, len);
-  mbedtls_md5_finish(&_ctx, _buf);
-  mbedtls_md5_free(&_ctx);
-  for(int i=0; i<16; i++){
-    sprintf(output + i*2, "%02x", _buf[i]);
-  }
-  return true;
-}
