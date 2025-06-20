@@ -1,7 +1,7 @@
 import unittest
 import asyncio
 from unittest.mock import Mock, patch
-from src.connections.device_manager import DeviceManager
+from src.service.device_manager import DeviceManager
 
 class TestDeviceManager(unittest.TestCase):
     def setUp(self):
@@ -48,29 +48,8 @@ class TestDeviceManager(unittest.TestCase):
         self.assertEqual(data['humidity'], 60.0)
         self.assertEqual(data['pressure'], 1013.25)
 
-    @patch('bleak.BleakScanner')
-    @patch('bleak.BleakClient')
-    async def test_bluetooth_connection(self, mock_client, mock_scanner):
-        # Setup mocks
-        mock_device = Mock()
-        mock_device.address = "00:11:22:33:44:55"
-        mock_scanner.find_device_by_name.return_value = mock_device
-        mock_client.return_value.is_connected = True
-        mock_client.return_value.read_gatt_char.return_value = b'{"temperature": 25.0, "humidity": 60.0, "pressure": 1013.25}'
-
-        # Test connection
-        result = await self.device.connect('bluetooth', device_name='ESP32-Weather')
-        self.assertTrue(result)
-        
-        # Test data reading
-        data = await self.device.read_data()
-        self.assertIsNotNone(data)
-        self.assertEqual(data['temperature'], 25.0)
-        self.assertEqual(data['humidity'], 60.0)
-        self.assertEqual(data['pressure'], 1013.25)
-
-def run_tests():
-    unittest.main()
+async def run_tests():
+    return unittest.main()
 
 if __name__ == '__main__':
     asyncio.run(run_tests())

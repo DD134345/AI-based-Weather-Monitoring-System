@@ -5,6 +5,7 @@
 #include <SPIFFS.h>
 #include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
+#include <mbedtls/md5.h>
 
 // Pin configuration
 #define DHTPIN 13
@@ -41,6 +42,12 @@ TaskHandle_t sensorTaskHandle = NULL;
 const unsigned long FAST_SAMPLING_INTERVAL = 5000; // 5 seconds
 const unsigned long SLOW_SAMPLING_INTERVAL = 3600000; // 1 hour
 const unsigned long UPDATE_INTERVAL = 10000; // 10 seconds
+
+// Function declarations
+void setupWiFi();
+bool isValidReading(float temp, float humidity, float pressure);
+void sendData(float temp, float humidity, float pressure);
+void saveToBuffer();
 
 void setup() {
     Serial.begin(115200);
@@ -160,7 +167,7 @@ void setupWebServer() {
         }
         jsonArray += "]";
         
-        request->send(200, "application/json", jsonArray);
+        request->send(200, "application/json", jsonString);
     });
     
     server.begin();
@@ -193,4 +200,58 @@ void saveDataToSPIFFS() {
     
     file.print(jsonArray);
     file.close();
+}
+
+// Implementations for the missing functions
+void setupWiFi() {
+    Serial.println("Connecting to WiFi");
+    WiFi.begin(ssid, password);
+    
+    while (WiFi.status() != WL_CONNECTED) {
+        delay(500);
+        Serial.print(".");
+    }
+    
+    Serial.println("WiFi connected");
+    Serial.print("IP address: ");
+    Serial.println(WiFi.localIP());
+}
+
+bool isValidReading(float temp, float humidity, float pressure) {
+    return (!isnan(temp) && !isnan(humidity) && !isnan(pressure));
+}
+
+void sendData(float temp, float humidity, float pressure) {
+    Serial.print("Temperature: ");
+    Serial.print(temp);
+    Serial.print(" *C, Humidity: ");
+    Serial.print(humidity);
+    Serial.print(" %, Pressure: ");
+    Serial.print(pressure);
+    Serial.println(" hPa");
+}
+
+void saveToBuffer() {
+    WeatherData newData;
+    newData.temperature = dht.readTemperature();
+    newData.humidity = dht.readHumidity();
+    newData.pressure = bmp.readPressure() / 100.0F;
+    newData.timestamp = millis();
+    
+    dataBuffer[bufferIndex] = newData;
+    bufferIndex = (bufferIndex + 1) % BUFFER_SIZE;
+}
+
+bool getMD5(uint8_t* data, uint16_t len, char* output){
+  unsigned char _buf[16];
+  mbedtls_md5_context _ctx;
+  mbedtls_md5_init(&_ctx);
+  mbedtls_md5_starts(&_ctx);
+  mbedtls_md5_update(&_ctx, data, len);
+  mbedtls_md5_finish(&_ctx, _buf);
+  mbedtls_md5_free(&_ctx);
+  for(int i=0; i<16; i++){
+    sprintf(output + i*2, "%02x", _buf[i]);
+  }
+  return true;
 }

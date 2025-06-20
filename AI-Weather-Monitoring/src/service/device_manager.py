@@ -15,8 +15,6 @@ class DeviceManager:
                 return await self._connect_serial(**params)
             elif method == 'wifi':
                 return await self._connect_wifi(**params)
-            elif method == 'bluetooth':
-                return await self._connect_bluetooth(**params)
             else:
                 self.logger.error(f"Unknown connection method: {method}")
                 return False
@@ -42,16 +40,6 @@ class DeviceManager:
             return True
         except Exception as e:
             self.logger.error(f"WiFi connection error: {e}")
-            return False
-
-    async def _connect_bluetooth(self, **params):
-        """Connect to device using Bluetooth connection"""
-        try:
-            # TODO: Implement Bluetooth connection logic here
-            self.connection = None  # Replace with actual Bluetooth connection
-            return True
-        except Exception as e:
-            self.logger.error(f"Bluetooth connection error: {e}")
             return False
 
     async def disconnect(self):

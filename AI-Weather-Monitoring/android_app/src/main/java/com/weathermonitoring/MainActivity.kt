@@ -108,14 +108,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showConnectionDialog() {
-        val items = arrayOf("Bluetooth", "WiFi", "USB")
+        val items = arrayOf("WiFi", "USB")
         MaterialAlertDialogBuilder(this)
             .setTitle("Connect to Device")
             .setItems(items) { _, which ->
                 when (which) {
-                    0 -> viewModel.connectBluetooth()
-                    1 -> showWifiDialog()
-                    2 -> viewModel.connectSerial()
+                    0 -> showWifiDialog()
+                    1 -> viewModel.connectSerial()
                 }
             }
             .show()

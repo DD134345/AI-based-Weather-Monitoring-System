@@ -32,10 +32,6 @@ class ConfigManager:
                     'ssid': os.getenv('WIFI_SSID', 'WeatherStation'),
                     'password': os.getenv('WIFI_PASSWORD', 'weather123')
                 },
-                'bluetooth': {
-                    'device_name': os.getenv('BT_DEVICE_NAME', 'WeatherStation'),
-                    'service_uuid': os.getenv('BT_SERVICE_UUID', '181A')
-                },
                 'system': {
                     'log_level': os.getenv('LOG_LEVEL', 'INFO'),
                     'cache_size': int(os.getenv('CACHE_SIZE', '1000'))

@@ -4,13 +4,16 @@ import logging
 from typing import Dict, Set
 from datetime import datetime
 import websockets
-from websockets.server import WebSocketServerProtocol
+import websockets.legacy
+from websockets.legacy.server import WebSocketServerProtocol
 from collections import deque
+
+import websockets.legacy.server
 
 class SimpleSensorHandler:
     def __init__(self):
         self.data_buffer = deque(maxlen=100)  # Reduced buffer size
-        self.connected_clients: Set[websockets.WebSocketServerProtocol] = set()
+        self.connected_clients: Set[websockets.legacy.server.WebSocketServerProtocol] = set()
         self.setup_logging()
         
     def setup_logging(self):
@@ -20,11 +23,11 @@ class SimpleSensorHandler:
         )
         self.logger = logging.getLogger(__name__)
 
-    async def start(self, port: str = 'COM3'):
+    async def start(self, serial_port: str = 'COM3'):
         """Start the main service"""
         try:
             await asyncio.gather(
-                self.start_serial(port),
+                self.start_serial(serial_port),
                 self.start_websocket_server()
             )
         except Exception as e:
@@ -49,7 +52,7 @@ class SimpleSensorHandler:
 
     async def start_websocket_server(self, port: int = 8765):
         """Simple WebSocket server"""
-        async with websockets.serve(self.handle_client, 'localhost', port):
+        async with websockets.legacy.server.serve(self.handle_client, 'localhost', port):
             self.logger.info(f"WebSocket server running on port {port}")
             await asyncio.Future()
 
@@ -66,7 +69,7 @@ class SimpleSensorHandler:
     async def handle_data(self, raw_data: bytes):
         """Process incoming data"""
         try:
-            data = json.loads(raw_data)
+            data = json.loads(raw_data.decode('utf-8').strip())
             if self.validate_data(data):
                 data['timestamp'] = datetime.now().isoformat()
                 self.data_buffer.append(data)
@@ -86,7 +89,7 @@ class SimpleSensorHandler:
             except Exception:
                 self.connected_clients.remove(client)
 
-    async def handle_client(self, websocket: websockets.WebSocketServerProtocol):
+    async def handle_client(self, websocket: WebSocketServerProtocol):
         """Handle client connection"""
         self.connected_clients.add(websocket)
         try:

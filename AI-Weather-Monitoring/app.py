@@ -117,8 +117,7 @@ class WeatherApp:
         connection_methods = [
             ('serial', {'port': port}) for port in self.get_com_ports()
         ] + [
-            ('wifi', {'ip': os.getenv('WIFI_HOST', '192.168.4.1')}),
-            ('bluetooth', {'device_name': os.getenv('BT_DEVICE_NAME', 'ESP32-Weather')})
+            ('wifi', {'ip': os.getenv('WIFI_HOST', '192.168.4.1')})
         ]
         
         for attempt in range(self.reconnect_attempts):
