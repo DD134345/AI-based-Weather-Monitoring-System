@@ -1,8 +1,4 @@
 #include <WiFi.h>
-#include <BLEDevice.h>
-#include <BLEServer.h>
-#include <BLEUtils.h>
-#include <BLE2902.h>
 #include <DHT.h>
 #include <Adafruit_BMP085.h>
 #include <ArduinoJson.h>
@@ -26,12 +22,6 @@ Adafruit_BMP085 bmp;
 const char* ssid = "WeatherStation";
 const char* password = "weather123";
 
-// Bluetooth
-BLEServer* pServer = NULL;
-BLECharacteristic* pCharacteristic = NULL;
-#define SERVICE_UUID "181A"
-#define CHAR_UUID "2A6E"
-
 // Web server
 AsyncWebServer server(80);
 
@@ -47,7 +37,6 @@ int bufferIndex = 0;
 
 // Task handles
 TaskHandle_t sensorTaskHandle = NULL;
-TaskHandle_t bleTaskHandle = NULL;
 
 const unsigned long FAST_SAMPLING_INTERVAL = 5000; // 5 seconds
 const unsigned long SLOW_SAMPLING_INTERVAL = 3600000; // 1 hour
@@ -74,7 +63,6 @@ void setup() {
     
     // Setup network connections
     setupWiFi();
-    setupBLE();
     setupWebServer();
 }
 
@@ -123,24 +111,6 @@ void sensorTask(void *parameter) {
     }
 }
 
-void setupBLE() {
-  BLEDevice::init("Weather Station");
-  pServer = BLEDevice::createServer();
-  BLEService *pService = pServer->createService(SERVICE_UUID);
-  pCharacteristic = pService->createCharacteristic(
-                      CHAR_UUID,
-                      BLECharacteristic::PROPERTY_READ   |
-                      BLECharacteristic::PROPERTY_WRITE  |
-                      BLECharacteristic::PROPERTY_NOTIFY
-                    );
-  pCharacteristic->addDescriptor(new BLE2902());
-  pService->start();
-  BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
-  pAdvertising->addServiceUUID(SERVICE_UUID);
-  pAdvertising->setScanResponse(true);
-  BLEDevice::startAdvertising();
-}
-
 void sendSensorData(float temp, float humidity, float pressure) {
     StaticJsonDocument<200> doc;
     doc["temperature"] = temp;
@@ -151,40 +121,6 @@ void sendSensorData(float temp, float humidity, float pressure) {
     String output;
     serializeJson(doc, output);
     Serial.println(output);
-    
-    // Also send via BLE if connected
-    if (deviceConnected) {
-        pCharacteristic->setValue(output.c_str());
-        pCharacteristic->notify();
-    }
-}
-
-void bleTask(void *parameter) {
-    TickType_t xLastWakeTime = xTaskGetTickCount();
-    
-    while(true) {
-        if (pCharacteristic) {
-            // Get latest data
-            WeatherData latest = dataBuffer[(bufferIndex - 1 + BUFFER_SIZE) % BUFFER_SIZE];
-            
-            // Create JSON
-            StaticJsonDocument<200> doc;
-            doc["temperature"] = latest.temperature;
-            doc["humidity"] = latest.humidity;
-            doc["pressure"] = latest.pressure;
-            doc["timestamp"] = latest.timestamp;
-            
-            String jsonString;
-            serializeJson(doc, jsonString);
-            
-            // Update BLE characteristic
-            pCharacteristic->setValue(jsonString.c_str());
-            pCharacteristic->notify();
-        }
-        
-        // Run task every 1 second
-        vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(1000));
-    }
 }
 
 void setupWebServer() {
